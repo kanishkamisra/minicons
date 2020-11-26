@@ -22,12 +22,15 @@ class LMScorer:
 
     def prepare_text(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
         raise NotImplementedError
+
+    def seq_score(self, batch: Iterable):
+        raise NotImplementedError
     
     def score(self, batch: Iterable) -> Union[float, List[float]]:
         
         result = self.logprobs(self.prepare_text(batch))
         logprob, _ = list(zip(*result))
-        surprisals = list(map(lambda x: x.sum().tolist(), logprob))
+        surprisals = list(map(lambda x: -x.sum().tolist(), logprob))
         
         return surprisals
 

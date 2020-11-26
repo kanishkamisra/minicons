@@ -56,9 +56,6 @@ class CWE():
 
         num_inputs = len(sentences)
 
-        # encoded = self.tokenizer.batch_encode_plus(list(list(zip(*sentences))[0]), padding = 'longest')
-        
-        # output = self.model(torch.tensor(encoded['input_ids']), attention_mask = torch.tensor(encoded['attention_mask']))
         input_ids, hidden_states = self.encode_text(list(list(zip(*sentences))[0]), layer)
 
         if isinstance(sentences[0][1], str):
@@ -70,8 +67,10 @@ class CWE():
         
         return hidden_states[torch.arange(num_inputs)[:, None], query_idx].mean(1)
 
-    def context_cosine(self, sentence, word, layer):
+    def context_cosine(self, sentence: str, word: str, layer: int = None):
+
         raise NotImplementedError
+
     
 
 
