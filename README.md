@@ -30,7 +30,7 @@ tensor([[ 0.5399, -0.2461, -0.0968,  ..., -0.4670, -0.5312, -0.0549],
 '''
 ```
 
-2. Compute sentence acceptability measures (log probabilities) using Incremental and Masked Language Models:
+2. Compute sentence acceptability measures (surprisals) using Incremental and Masked Language Models:
 
 ```py
 from minicons import scorer
