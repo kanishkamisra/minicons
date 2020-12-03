@@ -1,6 +1,6 @@
 from typing import Iterable, Union, List, Dict, Optional, Tuple
 
-from utils import find_pattern, find_index
+from .utils import find_pattern, find_index
 
 from transformers import AutoModel, AutoTokenizer
 import torch
