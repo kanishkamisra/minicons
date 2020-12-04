@@ -30,7 +30,7 @@ class LMScorer:
         
         result = self.logprobs(self.prepare_text(batch))
         logprob, _ = list(zip(*result))
-        reduced = list(map(lambda x: reduce(x, *args), logprob))
+        reduced = list(map(lambda x: reduce(x, *args).tolist(), logprob))
         
         return reduced
 
