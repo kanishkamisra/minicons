@@ -26,7 +26,7 @@ class LMScorer:
     def seq_score(self, batch: Iterable):
         raise NotImplementedError
     
-    def score(self, batch: Iterable, reduce: Callable = torch.mean(), *args) -> Union[float, List[float]]:
+    def score(self, batch: Iterable, reduce: Callable = torch.mean, *args) -> Union[float, List[float]]:
         
         result = self.logprobs(self.prepare_text(batch))
         logprob, _ = list(zip(*result))
