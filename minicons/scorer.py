@@ -1,4 +1,4 @@
-from typing import Iterable, Union, List, Dict, Optional
+from typing import Iterable, Union, List, Dict, Optional, Callable
 
 import torch
 from transformers import AutoModelForCausalLM, AutoModelForMaskedLM, AutoTokenizer
@@ -26,13 +26,13 @@ class LMScorer:
     def seq_score(self, batch: Iterable):
         raise NotImplementedError
     
-    def score(self, batch: Iterable) -> Union[float, List[float]]:
+    def score(self, batch: Iterable, reduce: Callable = torch.mean(), *args) -> Union[float, List[float]]:
         
         result = self.logprobs(self.prepare_text(batch))
         logprob, _ = list(zip(*result))
-        surprisals = list(map(lambda x: -x.sum().tolist(), logprob))
+        reduced = list(map(lambda x: reduce(x, *args), logprob))
         
-        return surprisals
+        return reduced
 
 
     def encode(self, text: Union[str, List[str]], manual_special: bool = True, return_tensors: Optional[str] = 'pt') -> Dict:
