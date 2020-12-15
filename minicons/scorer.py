@@ -219,7 +219,7 @@ class IncrementalLMScorer(LMScorer):
     
     def prepare_text(self, text: Union[str, List[str]]) -> Tuple:
         encoded = self.encode(text)
-        offsets = [0] * len(encoded)
+        offsets = [0] * len(encoded['input_ids'])
         return encoded, offsets
     
     def prime_text(self, preamble: Union[str, List[str]], stimuli: Union[str, List[str]]) -> Tuple:
