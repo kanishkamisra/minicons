@@ -53,8 +53,14 @@ def find_index(context: str, word: str, method: Optional[str] = "regular") -> in
         
         index = argmin(editdists)
     else:
-        prefix = context.split(word)[0].strip().split()
-        index = len(prefix)
+        prefix, postfix = context.split(word)
+        word_length = len(word.split(" "))
+
+        start = len(prefix.split())
+        end = start + word_length
+
+        #prefix = context.split(word)[0].strip().split()
+        #index = len(prefix)
     
-    return index
+    return start, end
 
