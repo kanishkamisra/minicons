@@ -1,4 +1,5 @@
 import random
+import re
 
 from typing import List, Tuple, Optional
 
@@ -53,7 +54,8 @@ def find_index(context: str, word: str, method: Optional[str] = "regular") -> in
         
         index = argmin(editdists)
     else:
-        prefix, postfix = context.split(word)
+        # prefix, postfix = context.split(word)
+        prefix, postfix = re.split(fr"\b{word}\b", context)
         word_length = len(word.split(" "))
 
         start = len(prefix.split())
