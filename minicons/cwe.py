@@ -1,6 +1,6 @@
 from typing import Iterable, Union, List, Dict, Optional, Tuple
 
-from .utils import find_pattern, find_index
+from .utils import find_pattern, find_index, find_paired_indices
 
 from transformers import AutoModel, AutoTokenizer
 import torch
@@ -97,7 +97,7 @@ class CWE():
         input_ids, hidden_states = self.encode_text(list(list(zip(*sentences))[0]), layer)
 
         if isinstance(sentences[0][1], str):
-            sentences = [(s, find_index(s, w1), find_index(s, w2)) for s, w1, w2 in sentences]
+            sentences = [(s, *find_paired_indices(s, w1, w2)) for s, w1, w2 in sentences]
         
         search_queries1 = [self.tokenizer.encode_plus(f' {" ".join(s.split()[idx1[0]:idx1[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
         search_queries2 = [self.tokenizer.encode_plus(f' {" ".join(s.split()[idx2[0]:idx2[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]

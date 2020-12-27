@@ -1,5 +1,6 @@
 import random
 import re
+import string
 
 from typing import List, Tuple, Optional
 
@@ -46,7 +47,7 @@ def edit_distance(word1: str, word2: str) -> int:
 
 def argmin(lst: List) -> int:
     return min(range(len(lst)), key=lambda x: lst[x])
-
+  
 def find_index(context: str, word: str, method: Optional[str] = "regular") -> int:
     if method == "edit":
         tokenized = context.split()
@@ -66,3 +67,17 @@ def find_index(context: str, word: str, method: Optional[str] = "regular") -> in
     
     return start, end
 
+def gen_words(length: int) -> str:
+    return " ".join([char for char in string.ascii_lowercase[0:length]])
+
+def find_paired_indices(context: str, word1: str, word2: str, importance: int = 1) -> List[int]:
+    if importance == 1:
+        idx1 = find_index(context, word1)
+        replace_cand = gen_words(len(word1.split()))
+        idx2 = find_index(context.replace(word1, replace_cand), word2)
+    else:
+        idx2 = find_index(context, word2)
+        replace_cand = gen_words(len(word2.split()))
+        idx1 = find_index(context.replace(word2, replace_cand), word1)
+    
+    return idx1, idx2
