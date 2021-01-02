@@ -205,9 +205,9 @@ class IncrementalLMScorer(LMScorer):
             self.tokenizer.add_special_tokens({"additional_special_tokens": ["<|pad|>"]})
             self.tokenizer.pad_token = "<|pad|>"
 
-        if self.tokenizer.eos_token is None:
-            self.tokenizer.add_special_tokens({"additional_special_tokens": ["<|eos|>"]})
-            self.tokenizer.eos_token = "<|eos|>"
+        # if self.tokenizer.eos_token is None:
+        #     self.tokenizer.add_special_tokens({"additional_special_tokens": ["<|eos|>"]})
+        #     self.tokenizer.eos_token = "<|eos|>"
 
         if self.tokenizer.bos_token is None:
             self.tokenizer.add_special_tokens({"additional_special_tokens": ["<|bos|>"]})
@@ -216,6 +216,12 @@ class IncrementalLMScorer(LMScorer):
         self.model.resize_token_embeddings(len(self.tokenizer))
         self.model.to(self.device)
         self.model.eval()
+    
+    def add_special_tokens(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
+        sentences = [text] if isinstance(text, str) else text
+        sentences = [self.tokenizer.bos_token + sentence for sentence in sentences]
+
+        return sentences
     
     def prepare_text(self, text: Union[str, List[str]]) -> Tuple:
         encoded = self.encode(text)
