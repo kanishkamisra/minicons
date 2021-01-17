@@ -168,7 +168,7 @@ class MaskedLMScorer(LMScorer):
 
         return masked_tensors
 
-    def logprobs(self, batch: Iterable) -> Union[float, List[float]]:
+    def logprobs(self, batch: Iterable, rank = False) -> Union[float, List[float]]:
         
         # takes in prepared text and returns scores for each sentence in batch
         token_ids, attention_masks, effective_token_ids, lengths, offsets = list(zip(*batch))
@@ -188,9 +188,18 @@ class MaskedLMScorer(LMScorer):
                 logits.detach()
             
             sent_log_probs = logits - logits.logsumexp(1).unsqueeze(1)
+            if rank:
+                shape = sent_log_probs.shape
+                inv_ranks = (sent_log_probs).argsort().argsort() + 1
+                ranks = shape[1] - inv_ranks + 1
+                word_ranks = ranks[torch.arange(shape[0]), effective_token_ids].split(lengths)
             sent_log_probs = sent_log_probs[torch.arange(sum(lengths)), effective_token_ids].type(torch.DoubleTensor).split(lengths)
             # sentence_scores = list(map(lambda x: x.sum().tolist(), logprobs))
             # outputs.append((logprobs, sent_tokens))
+            if rank:
+                return list(zip(sent_log_probs, sent_tokens, word_ranks))
+    
+            
         return list(zip(sent_log_probs, sent_tokens))
 
 class IncrementalLMScorer(LMScorer):
@@ -239,7 +248,7 @@ class IncrementalLMScorer(LMScorer):
             
         return self.encode(sentences), preamble_lens
 
-    def logprobs(self, batch: Iterable) -> Union[float, List[float]]:
+    def logprobs(self, batch: Iterable, rank = False) -> Union[float, List[float]]:
         
         batch, offsets = batch
         ids = batch["input_ids"]
@@ -275,11 +284,18 @@ class IncrementalLMScorer(LMScorer):
             sent_ids_scores = sent_logits.gather(1, sent_ids.unsqueeze(1)).squeeze(1)
             # log_prob.shape = [seq_len + 1]
             sent_log_probs = sent_ids_scores - sent_logits.logsumexp(1)
-
+            
             sent_log_probs = sent_log_probs.type(torch.DoubleTensor)
             sent_log_probs = sent_log_probs[offsets[sent_index]:]
-            # sent_ids = sent_ids.type(torch.LongTensor)
-            outputs.append((sent_log_probs, sent_tokens))
+            lengths = len(sent_log_probs)
+            if rank:
+                shape = sent_logits.shape
+                inv_ranks = (sent_logits).argsort().argsort() + 1
+                ranks = shape[1] - inv_ranks + 1
+                word_ranks = ranks[list(range(shape[0]))[offsets[sent_index]:], sent_ids[offsets[sent_index]: ].tolist()].split(lengths)
+                outputs.append((sent_log_probs, sent_tokens, word_ranks))
+            else:
+                outputs.append((sent_log_probs, sent_tokens))
             # output = (sent_log_probs.sum(), sent_ids, sent_tokens)
             # outputs.append(output)
         return outputs
