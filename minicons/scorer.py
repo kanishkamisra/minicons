@@ -293,6 +293,7 @@ class IncrementalLMScorer(LMScorer):
                 inv_ranks = (sent_logits).argsort().argsort() + 1
                 ranks = shape[1] - inv_ranks + 1
                 word_ranks = ranks[list(range(shape[0]))[offsets[sent_index]:], sent_ids[offsets[sent_index]: ].tolist()].split(lengths)
+                word_ranks = [x[0] for x in word_ranks]
                 outputs.append((sent_log_probs, sent_tokens, word_ranks))
             else:
                 outputs.append((sent_log_probs, sent_tokens))
