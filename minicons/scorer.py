@@ -16,8 +16,11 @@ class LMScorer:
         sentences = [self.tokenizer.bos_token + sentence + self.tokenizer.eos_token for sentence in sentences]
 
         return sentences
+    
+    def distribution(self, batch: Iterable) -> torch.Tensor:
+        raise NotImplementedError
 
-    def logprobs(self, batch: Iterable) -> Union[float, List[float]]:
+    def logprobs(self, batch: Iterable, rank: bool = False) -> Union[float, List[float]]:
         raise NotImplementedError
 
     def prepare_text(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
@@ -168,6 +171,28 @@ class MaskedLMScorer(LMScorer):
 
         return masked_tensors
 
+    def distribution(self, batch: Iterable) -> torch.Tensor:
+        
+    # takes in prepared text and returns scores for each sentence in batch
+        token_ids, attention_masks, effective_token_ids, lengths, offsets = list(zip(*batch))
+        token_ids = torch.cat(token_ids)
+        attention_masks = torch.cat(attention_masks)
+        token_ids = token_ids.to(self.device)
+        attention_masks = attention_masks.to(self.device)
+        effective_token_ids = torch.cat([torch.tensor(x) for x in effective_token_ids])
+
+        sent_tokens = list(map(lambda x: self.tokenizer.convert_ids_to_tokens(x.tolist()), effective_token_ids.split(lengths)))
+
+        indices = list(itertools.chain.from_iterable([list(range(o,o+n)) for n, o in zip(lengths, offsets)]))
+        with torch.no_grad():
+            output = self.model(token_ids, attention_mask = attention_masks)
+            logits = output.logits[torch.arange(sum(lengths)), indices]
+            if self.device == 'cuda:0' or self.device == "cuda:1":
+                logits.detach()
+            
+    #     logits = logits[torch.arange(sum(lengths)), effective_token_ids].type(torch.DoubleTensor).split(lengths)
+        return logits
+
     def logprobs(self, batch: Iterable, rank = False) -> Union[float, List[float]]:
         
         # takes in prepared text and returns scores for each sentence in batch
@@ -247,6 +272,41 @@ class IncrementalLMScorer(LMScorer):
         sentences = [preamble + " " + stimuli] if isinstance(preamble, str) else [p + " " + s for p , s in list(zip(preamble, stimuli))]
             
         return self.encode(sentences), preamble_lens
+    
+    def distribution(self, batch: Iterable) -> torch.Tensor:
+        batch, offsets = batch
+        ids = batch["input_ids"]
+        ids = ids.to(self.device)
+        attention_masks = batch["attention_mask"]
+        attention_masks = attention_masks.to(self.device)
+        nopad_mask = ids != self.tokenizer.pad_token_id
+
+        with torch.no_grad():
+            outputs = self.model(ids, attention_mask=attention_masks)
+            logits = outputs.logits
+            if self.device == 'cuda:0' or self.device == "cuda:1":
+                logits.detach()
+
+        outputs = []
+        for sent_index in range(len(ids)):
+            sent_nopad_mask = nopad_mask[sent_index]
+            # len(tokens) = len(text[sent_index]) + 1
+            sent_tokens = [
+                tok
+                for i, tok in enumerate(batch.tokens(sent_index))
+                if sent_nopad_mask[i] and i > offsets[sent_index]
+            ]
+
+            # sent_ids.shape = [len(text[sent_index]) + 1]
+            # ignore first token (<|eos|>)
+            sent_ids = ids[sent_index, sent_nopad_mask][1:]
+            # logits.shape = [len(text[sent_index]) + 1, vocab_size]
+            sent_logits = logits[sent_index, sent_nopad_mask][:-1, :]
+            sent_logits[:, self.tokenizer.pad_token_id] = float("-inf")
+
+            outputs.append(sent_logits[-1])
+        return torch.stack(outputs, 0)
+
 
     def logprobs(self, batch: Iterable, rank = False) -> Union[float, List[float]]:
         
