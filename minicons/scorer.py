@@ -61,6 +61,9 @@ class LMScorer:
             tokens = self.tokenizer.batch_encode_plus(sentences, padding = 'longest', return_attention_mask = True)
 
         return tokens
+    
+    def decode(self, idx):
+        return [self.tokenizer.decode([x]).strip() for x in self.tokenizer.convert_tokens_to_ids(self.tokenizer.convert_ids_to_tokens(idx))]
 
 class MaskedLMScorer(LMScorer):
     def __init__(self, model_name: str, device: str) -> None:
