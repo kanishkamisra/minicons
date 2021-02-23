@@ -21,16 +21,19 @@ class SupervisedHead:
         
         return encoded
     
-    def logits(self, inputs: Union[str, List[str]], verbose: bool = False) -> Union[torch.Tensor, Dict]:
+    def logits(self, inputs: Union[str, List[str]], probs: bool = True, verbose: bool = False) -> Union[torch.Tensor, Dict]:
         encoded = self.encode(inputs)
 
         output = self.model(**encoded).logits.detach()
+
+        if probs:
+            output = output.softmax(1)
 
         if verbose:
             if 'label2id' not in self.model.config.to_dict().keys():
                 output = output
             else:
-                output = {k: output[:, v] for k, v in self.model.config.to_dict().items()}
+                output = {k: output[:, v].tolist()for k, v in self.model.config.to_dict()['label2id'].items()}
 
         return output
         
