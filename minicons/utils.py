@@ -81,3 +81,9 @@ def find_paired_indices(context: str, word1: str, word2: str, importance: int = 
         idx1 = find_index(context.replace(word2, replace_cand), word1)
     
     return idx1, idx2
+
+
+def mask(sentence: str, word: str) -> str:
+    replaced = re.sub(rf'(?<![\w\/-])({word})(?=[^\w\/-])', '[MASK]', sentence)
+    masked = ['[CLS]'] + [replaced] + ['[SEP]']
+    return ' '.join(masked)
