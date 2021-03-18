@@ -6,12 +6,34 @@ from transformers import AutoModelForCausalLM, AutoModelForMaskedLM, AutoTokeniz
 import itertools
 
 class LMScorer:
-    def __init__(self, model_name: str, device: str = 'cpu') -> None:
-        
+    """
+    Base LM scorer class intended to store models and tokenizers along
+    with methods to facilitate the analysis of language model output scores.
+    """
+    def __init__(self, model_name: str, device: Optional[str] = 'cpu') -> None:
+        """
+        :param model_name: name of the model, should either be a path
+            to a model (.pt or .bin file) stored locally, or a
+            pretrained model stored on the Huggingface Model Hub.
+
+        :type model_name: str
+        :param device: device type that the model should be loaded on,
+            options: `cpu or cuda:{0, 1, ...}`
+        :type device: str, optional
+        """
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast = True)
         self.device = device
 
     def add_special_tokens(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
+        """
+        Reformats input text to add special model-dependent tokens. Common
+        to both kinds of child classes.
+
+        :param text: single string or batch of strings to be
+            modified.
+        :type text: Union[str, List[str]]
+        :rtype: Union[float, List[float]]:
+        """
         sentences = [text] if isinstance(text, str) else text
         sentences = [self.tokenizer.bos_token + sentence + self.tokenizer.eos_token for sentence in sentences]
 
@@ -32,21 +54,51 @@ class LMScorer:
     def seq_score(self, batch: Iterable):
         raise NotImplementedError
     
-    def score(self, batch: Iterable, reduce: Callable = torch.mean, *args) -> Union[float, List[float]]:
-        
+    def score(self, batch: Iterable, pool: Callable = torch.mean, *args) -> Union[float, List[float]]:
+        '''
+        Pooled estimates of sentence log probabilities, computed by the
+        language model. Pooling is usually done using a function that
+        is passed to the method.
+
+        :param batch: a list of sentences that will be passed to the
+            language model to score.
+        :type batch: Iterable
+        :param pool: Pooling function, is selected to be
+            `torch.mean()` by default.
+        :type pool: Callable
+        :rtype: Union[float, List[float]]
+        '''
         result = self.logprobs(self.prepare_text(batch))
         logprob, _ = list(zip(*result))
-        reduced = list(map(lambda x: reduce(x, *args).tolist(), logprob))
+        pooled = list(map(lambda x: pool(x, *args).tolist(), logprob))
         
-        return reduced
+        return pooled
     
-    def adapt_score(self, preamble: Iterable, stimuli: Iterable, reduce: Callable = torch.mean, *args) -> Union[float, List[float]]:
-        
+    def adapt_score(self, preamble: Iterable, stimuli: Iterable, pool: Callable = torch.mean, *args) -> Union[float, List[float]]:
+        '''
+        Pooled estimates of sequence log probabilities, given a
+        preamble, computed by the language model. Pooling is usually
+        done using a function that is passed to the method.
+
+        :param preamble: a batch of preambles or primes passed to the
+            language model. This is what the squence is conditioned on,
+            and the model ignores the word probabilities of this part
+            of the input in estimating the overall score.
+        :type preamble: Iterable
+        :param stimuli: a batch of sequences (same length as premble)
+            that form the main input consisting of the sequence whose
+            score you want to calculate.
+        :type stimuli: Iterable
+        :param pool: Pooling function, is selected to be
+            `torch.mean()` by default.
+        :type pool: Callable
+        :rtype: Union[float, List[float]]
+        '''
         result = self.logprobs(self.prime_text(preamble, stimuli))
         logprob, _ = list(zip(*result))
-        reduced = list(map(lambda x: reduce(x, *args).tolist(), logprob))
+        poold = list(map(lambda x: pool(x, *args).tolist(), logprob))
         
-        return reduced
+        return poold
 
     def encode(self, text: Union[str, List[str]], manual_special: bool = True, return_tensors: Optional[str] = 'pt') -> Dict:       
         sentences = [text] if isinstance(text, str) else text
