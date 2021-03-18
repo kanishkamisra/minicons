@@ -4,6 +4,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoModelForMaskedLM, AutoTokenizer
 
 import itertools
+import re
 
 class LMScorer:
     """
@@ -23,6 +24,7 @@ class LMScorer:
         """
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast = True)
         self.device = device
+        self.vocab = [(x.strip(), i) for x, i in [(self.tokenizer.decode([i]), i) for i in range(self.tokenizer.vocab_size)] if " " in x and x.islower()]
 
     def add_special_tokens(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
         """
@@ -131,6 +133,33 @@ class MaskedLMScorer(LMScorer):
         self.sep_token_id = self.tokenizer.sep_token_id
         self.mask_token_id = self.tokenizer.mask_token_id
         self.pad_token_id = self.tokenizer.pad_token_id
+
+    def mask(self, sentence_words: Union[str, List[str]]) -> Tuple:
+        sentence_words = [sentence_words] if isinstance(sentence_words[0], str) else sentence_words
+        sentences, words = list(zip(*sentence_words))
+        words = list(words)
+        length = len(words)
+
+        sentences = [re.sub(rf'(?<![\w\/-])({word})(?=[^\w\/-])', self.tokenizer.mask_token, sentence) for sentence, word in sentence_words]
+
+        return (sentences, words, length)
+
+    def cloze(self, sentence_words: Union[str, List[str]]) -> torch.Tensor:
+
+        sentences, words, length = self.mask(sentence_words)
+
+        encoded = self.tokenizer(sentences, return_tensors='pt')
+        encoded = encoded.to(self.device)
+
+        idx = torch.nonzero(encoded['input_ids'] == self.tokenizer.mask_token_id, as_tuple=False)[:,1].unsqueeze(1)
+        word_idx = self.tokenizer(words, add_special_tokens=False)['input_ids']
+        with torch.no_grad():
+            masked_logits = self.model(**encoded).logits[torch.arange(length)[:, None], idx].squeeze().detach()
+            logprobs = masked_logits - masked_logits.logsumexp(1).unsqueeze(1)
+            masked_logprobs = logprobs[torch.arange(2)[:, None], word_idx].exp().squeeze()
+        
+        return masked_logprobs
+
 
     def prepare_text(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
         # converts input text to batch of tensors with every position except the cls and sep token masked
