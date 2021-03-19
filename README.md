@@ -56,7 +56,6 @@ print(ilm_model.score(stimuli))
 
 ## Upcoming features:
 
-- Pairwise scoring of batched sentences (Compute scores on BLiMP easily!)
 - Explore word probabilities in context (with top-k probabilities)
 - Explore attention distributions extracted from transformers.
 - Contextual cosine similarities, i.e., compute a word's cosine similarity with every other word in the input context with batched computation.

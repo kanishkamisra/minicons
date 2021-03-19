@@ -1,10 +1,10 @@
-from typing import Iterable, Union, List, Dict, Optional, Callable, Tuple
+from typing import Iterable, Union, List, Dict, Optional, Callable, Tuple, Any
 
 import torch
 from transformers import AutoModelForCausalLM, AutoModelForMaskedLM, AutoTokenizer
 
-import itertools
-import re
+from itertools import chain
+from re import sub
 
 class LMScorer:
     """
@@ -16,7 +16,6 @@ class LMScorer:
         :param model_name: name of the model, should either be a path
             to a model (.pt or .bin file) stored locally, or a
             pretrained model stored on the Huggingface Model Hub.
-
         :type model_name: str
         :param device: device type that the model should be loaded on,
             options: `cpu or cuda:{0, 1, ...}`
@@ -27,19 +26,7 @@ class LMScorer:
         self.vocab = [(x.strip(), i) for x, i in [(self.tokenizer.decode([i]), i) for i in range(self.tokenizer.vocab_size)] if " " in x and x.islower()]
 
     def add_special_tokens(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
-        """
-        Reformats input text to add special model-dependent tokens. Common
-        to both kinds of child classes.
-
-        :param text: single string or batch of strings to be
-            modified.
-        :type text: Union[str, List[str]]
-        :rtype: Union[float, List[float]]:
-        """
-        sentences = [text] if isinstance(text, str) else text
-        sentences = [self.tokenizer.bos_token + sentence + self.tokenizer.eos_token for sentence in sentences]
-
-        return sentences
+        raise NotImplementedError
     
     def distribution(self, batch: Iterable) -> torch.Tensor:
         raise NotImplementedError
@@ -56,7 +43,7 @@ class LMScorer:
     def seq_score(self, batch: Iterable):
         raise NotImplementedError
     
-    def score(self, batch: Iterable, pool: Callable = torch.mean, *args) -> Union[float, List[float]]:
+    def score(self, batch: Union[str, List[str]], pool: Callable = torch.mean, *args) -> Union[float, List[float]]:
         '''
         Pooled estimates of sentence log probabilities, computed by the
         language model. Pooling is usually done using a function that
@@ -64,10 +51,12 @@ class LMScorer:
 
         :param batch: a list of sentences that will be passed to the
             language model to score.
-        :type batch: Iterable
+        :type batch: Union[str, List[str]]
         :param pool: Pooling function, is selected to be
             `torch.mean()` by default.
         :type pool: Callable
+        :return: Float or list of floats specifying the log
+            probabilities of the input sentence(s).
         :rtype: Union[float, List[float]]
         '''
         result = self.logprobs(self.prepare_text(batch))
@@ -76,24 +65,26 @@ class LMScorer:
         
         return pooled
     
-    def adapt_score(self, preamble: Iterable, stimuli: Iterable, pool: Callable = torch.mean, *args) -> Union[float, List[float]]:
+    def adapt_score(self, preamble: Union[str, List[str]], stimuli: Union[str, List[str]], pool: Callable = torch.mean, *args) -> Union[float, List[float]]:
         '''
         Pooled estimates of sequence log probabilities, given a
         preamble, computed by the language model. Pooling is usually
         done using a function that is passed to the method.
 
         :param preamble: a batch of preambles or primes passed to the
-            language model. This is what the squence is conditioned on,
+            language model. This is what the sequence is conditioned on,
             and the model ignores the word probabilities of this part
             of the input in estimating the overall score.
-        :type preamble: Iterable
-        :param stimuli: a batch of sequences (same length as premble)
+        :type preamble: Union[str, List[str]]
+        :param stimuli: a batch of sequences (same length as preamble)
             that form the main input consisting of the sequence whose
             score you want to calculate.
-        :type stimuli: Iterable
+        :type stimuli: Union[str, List[str]]
         :param pool: Pooling function, is selected to be
             `torch.mean()` by default.
         :type pool: Callable
+        :return: Float or list of floats specifying the log
+            probabilities of the input sentence(s). 
         :rtype: Union[float, List[float]]
         '''
         result = self.logprobs(self.prime_text(preamble, stimuli))
@@ -102,7 +93,20 @@ class LMScorer:
         
         return poold
 
-    def encode(self, text: Union[str, List[str]], manual_special: bool = True, return_tensors: Optional[str] = 'pt') -> Dict:       
+    def encode(self, text: Union[str, List[str]], manual_special: bool = True, return_tensors: Optional[str] = 'pt') -> Dict:
+        """
+        Encode a batch of sentences using the model's tokenizer.
+        Equivalent of calling `model.tokenizer(input)`
+
+        :param ``Union[str, List[str]]`` text: Input batch/sentence to
+            be encoded.
+        :param manual_special: Specification of whether special tokens
+            will be manually encoded.
+        :type manual_special: bool
+        :param return_tensors: returned tensor format. Default `'pt'`
+        :type manual_special: str
+        :return: Encoded batch 
+        """
         sentences = [text] if isinstance(text, str) else text
 
         if manual_special:
@@ -117,11 +121,30 @@ class LMScorer:
         return tokens
     
     def decode(self, idx):
+        """
+        Decode input ids using the model's tokenizer.
+
+        :param idx: list of ids.
+        :return: Encoded batch 
+        """
         return [self.tokenizer.decode([x]).strip() for x in self.tokenizer.convert_tokens_to_ids(self.tokenizer.convert_ids_to_tokens(idx))]
 
 class MaskedLMScorer(LMScorer):
-    def __init__(self, model_name: str, device: str) -> None:
-        
+    """
+    Implements LM scoring and output probability analysis for masked
+    language models such as BERT and RoBERTa.
+    """
+    def __init__(self, model_name: str, device: Optional[str] = 'cpu') -> None:
+        """
+        :param model_name: name of the model, should either be a path
+            to a model (.pt or .bin file) stored locally, or a
+            pretrained model stored on the Huggingface Model Hub.
+
+        :type model_name: str
+        :param device: device type that the model should be loaded on,
+            options: `cpu or cuda:{0, 1, ...}`
+        :type device: str, optional
+        """
         super(MaskedLMScorer, self).__init__(model_name, device)
         
         self.model = AutoModelForMaskedLM.from_pretrained(model_name, return_dict = True)
@@ -129,23 +152,64 @@ class MaskedLMScorer(LMScorer):
         self.model.eval()
         
         # define CLS and SEP tokens
+        self.bos_token_id = self.tokenizer.cls_token_id
+        self.eos_token_id = self.tokenizer.sep_token_id
         self.cls_token_id = self.tokenizer.cls_token_id
         self.sep_token_id = self.tokenizer.sep_token_id
         self.mask_token_id = self.tokenizer.mask_token_id
         self.pad_token_id = self.tokenizer.pad_token_id
+    
+    def add_special_tokens(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
+        """
+        Reformats input text to add special model-dependent tokens.
 
-    def mask(self, sentence_words: Union[str, List[str]]) -> Tuple:
+        :param text: single string or batch of strings to be
+            modified.
+        :type text: Union[str, List[str]]
+        :return: Modified input, containing special tokens as per 
+            tokenizer specification
+        :rtype: Union[float, List[float]]:
+        """
+        sentences = [text] if isinstance(text, str) else text
+        sentences = [self.tokenizer.cls_token + " " + sentence + " " + self.tokenizer.sep_token for sentence in sentences]
+
+        return sentences
+
+    def mask(self, sentence_words: Union[Tuple[str], List[Tuple[str]]]) -> Tuple:
+        """
+        Processes a list of (sentence, word) into input that has the
+        word masked out of the sentence. 
+        
+        Note: only works for masked LMs.
+
+        :param ``Union[Tuple[str], List[Tuple[str]]]`` sentence_words:
+            Input consisting of `[(sentence, word)]`, where sentence
+            is an input sentence, and word is a word present in the
+            sentence that will be masked out.
+        :return: Tuple `(sentence, word, length)`
+        """
         sentence_words = [sentence_words] if isinstance(sentence_words[0], str) else sentence_words
         sentences, words = list(zip(*sentence_words))
         words = list(words)
         length = len(words)
 
-        sentences = [re.sub(rf'(?<![\w\/-])({word})(?=[^\w\/-])', self.tokenizer.mask_token, sentence) for sentence, word in sentence_words]
+        sentences = [sub(rf'(?<![\w\/-])({word})(?=[^\w\/-])', self.tokenizer.mask_token, sentence) for sentence, word in sentence_words]
 
         return (sentences, words, length)
 
     def cloze(self, sentence_words: Union[str, List[str]]) -> torch.Tensor:
+        """
+        Runs inference on masked input. 
+        Note: only works for masked LMs.
 
+        :param ``Union[Tuple[str], List[Tuple[str]]]`` sentence_words:
+            Input consisting of `[(sentence, word)]`, where sentence
+            is an input sentence, and word is a word present in the
+            sentence that will be masked out and inferred.
+        
+        :return: A tensor with log probabilities for the desired word
+            in context
+        """
         sentences, words, length = self.mask(sentence_words)
 
         encoded = self.tokenizer(sentences, return_tensors='pt')
@@ -161,7 +225,19 @@ class MaskedLMScorer(LMScorer):
         return masked_logprobs
 
 
-    def prepare_text(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
+    def prepare_text(self, text: Union[str, List[str]]) -> Iterable[Any]:
+        """
+        Prepares a batch of input text into a format fit to run MLM
+        scoring on. 
+
+        Borrows preprocessing algorithm from Salazar et al. (2020), and
+        modifies code from the following github repository by simonpri:
+            https://github.com/simonepri/lm-scorer
+        
+        :param text: batch of sentences to be prepared for scoring.
+        :return: Batch of formatted input that can be passed to
+            `logprob`
+        """
         # converts input text to batch of tensors with every position except the cls and sep token masked
         sentences = [text] if isinstance(text, str) else text
         
@@ -205,8 +281,22 @@ class MaskedLMScorer(LMScorer):
         
         return masked_tensors
 
-    def prime_text(self, preamble: Union[str, List[str]] , stimuli: Union[str, List[str]]) -> Tuple:
-   
+    def prime_text(self, preamble: Union[str, List[str]] , stimuli: Union[str, List[str]]) -> Iterable[Any]:
+        """
+        Prepares a batch of input text `(preamble, stimuli)` into a
+        format fit for running MLM scoring on.
+        This is different from `prepare_text()` as it runs a different
+        preprocessing step, to ensure the preamble is only used as a
+        condition for estimating stimuli word probabilities.
+
+        Borrows preprocessing algorithm from Salazar et al. (2020), and
+        modifies code from the following github repository by simonpri:
+            https://github.com/simonepri/lm-scorer
+        
+        :param text: batch of sentences to be prepared for scoring.
+        :return: Batch of formatted input that can be passed to
+            `logprob`
+        """
         preamble_text = [preamble] if isinstance(preamble, str) else preamble
         preamble_encoded = self.encode(preamble_text, False)['input_ids']
         preamble_lens = []
@@ -256,29 +346,14 @@ class MaskedLMScorer(LMScorer):
         return masked_tensors
 
     def distribution(self, batch: Iterable) -> torch.Tensor:
-        
-    # takes in prepared text and returns scores for each sentence in batch
-        token_ids, attention_masks, effective_token_ids, lengths, offsets = list(zip(*batch))
-        token_ids = torch.cat(token_ids)
-        attention_masks = torch.cat(attention_masks)
-        token_ids = token_ids.to(self.device)
-        attention_masks = attention_masks.to(self.device)
-        effective_token_ids = torch.cat([torch.tensor(x) for x in effective_token_ids])
+        """
+        Returns a distribution over the vocabulary of the model.
 
-        sent_tokens = list(map(lambda x: self.tokenizer.convert_ids_to_tokens(x.tolist()), effective_token_ids.split(lengths)))
+        :param `Iterable` batch: A batch of inputs fit to pass to a
+            transformer LM.
 
-        indices = list(itertools.chain.from_iterable([list(range(o,o+n)) for n, o in zip(lengths, offsets)]))
-        with torch.no_grad():
-            output = self.model(token_ids, attention_mask = attention_masks)
-            logits = output.logits[torch.arange(sum(lengths)), indices]
-            if self.device == 'cuda:0' or self.device == "cuda:1":
-                logits.detach()
-            
-    #     logits = logits[torch.arange(sum(lengths)), effective_token_ids].type(torch.DoubleTensor).split(lengths)
-        return logits
-
-    def logprobs(self, batch: Iterable, rank = False) -> Union[float, List[float]]:
-        
+        :return: Tensor consisting of log probabilies over vocab items.
+        """
         # takes in prepared text and returns scores for each sentence in batch
         token_ids, attention_masks, effective_token_ids, lengths, offsets = list(zip(*batch))
         token_ids = torch.cat(token_ids)
@@ -288,8 +363,38 @@ class MaskedLMScorer(LMScorer):
         effective_token_ids = torch.cat([torch.tensor(x) for x in effective_token_ids])
 
         sent_tokens = list(map(lambda x: self.tokenizer.convert_ids_to_tokens(x.tolist()), effective_token_ids.split(lengths)))
+
+        indices = list(chain.from_iterable([list(range(o,o+n)) for n, o in zip(lengths, offsets)]))
+        with torch.no_grad():
+            output = self.model(token_ids, attention_mask = attention_masks)
+            logits = output.logits[torch.arange(sum(lengths)), indices]
+            if self.device == 'cuda:0' or self.device == "cuda:1":
+                logits.detach()
+
+        return logits
+
+    def logprobs(self, batch: Iterable, rank = False) -> Union[List[Tuple[torch.Tensor, str]], List[Tuple[torch.Tensor, str, int]]]:
+        """
+        Returns log probabilities
+
+        :param `Iterable` batch: A batch of inputs fit to pass to a
+            transformer LM.
+        :param rank: Specifies whether to also return ranks of words.
+        :type rank: bool
+
+        :return: List of MLM score metrics and tokens.
+        :rtype: Union[List[Tuple[torch.Tensor, str]], List[Tuple[torch.Tensor, str, int]]]
+        """
+        token_ids, attention_masks, effective_token_ids, lengths, offsets = list(zip(*batch))
+        token_ids = torch.cat(token_ids)
+        attention_masks = torch.cat(attention_masks)
+        token_ids = token_ids.to(self.device)
+        attention_masks = attention_masks.to(self.device)
+        effective_token_ids = torch.cat([torch.tensor(x) for x in effective_token_ids])
+
+        sent_tokens = list(map(lambda x: self.tokenizer.convert_ids_to_tokens(x.tolist()), effective_token_ids.split(lengths)))
         
-        indices = list(itertools.chain.from_iterable([list(range(o,o+n)) for n, o in zip(lengths, offsets)]))
+        indices = list(chain.from_iterable([list(range(o,o+n)) for n, o in zip(lengths, offsets)]))
         with torch.no_grad():
             output = self.model(token_ids, attention_mask = attention_masks)
             logits = output.logits[torch.arange(sum(lengths)), indices]
@@ -312,8 +417,21 @@ class MaskedLMScorer(LMScorer):
         return list(zip(sent_log_probs, sent_tokens))
 
 class IncrementalLMScorer(LMScorer):
-    def __init__(self, model_name: str, device: str) -> None:
-        
+    """
+    Implements LM scoring and output probability analysis for incremental
+    LMs such as GPT and GPT2.
+    """
+    def __init__(self, model_name: str, device: Optional[str] = 'cpu') -> None:
+        """
+        :param model_name: name of the model, should either be a path
+            to a model (.pt or .bin file) stored locally, or a
+            pretrained model stored on the Huggingface Model Hub.
+
+        :type model_name: str
+        :param device: device type that the model should be loaded on,
+            options: `cpu or cuda:{0, 1, ...}`
+        :type device: str, optional
+        """
         super(IncrementalLMScorer, self).__init__(model_name, device)
         
         self.model = AutoModelForCausalLM.from_pretrained(model_name, return_dict = True)
@@ -336,17 +454,43 @@ class IncrementalLMScorer(LMScorer):
         self.model.eval()
     
     def add_special_tokens(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
+        """
+        Reformats input text to add special model-dependent tokens.
+
+        :param text: single string or batch of strings to be
+            modified.
+        :type text: Union[str, List[str]]
+        :return: Modified input, containing special tokens as per 
+            tokenizer specification
+        :rtype: Union[float, List[float]]:
+        """
         sentences = [text] if isinstance(text, str) else text
-        sentences = [self.tokenizer.bos_token + sentence for sentence in sentences]
+        sentences = [self.tokenizer.bos_token + " " + sentence for sentence in sentences]
 
         return sentences
     
     def prepare_text(self, text: Union[str, List[str]]) -> Tuple:
+        """
+        Prepares a batch of input text into a format fit to run LM
+        scoring on. 
+
+        :param text: batch of sentences to be prepared for scoring.
+        :return: Batch of formatted input that can be passed to
+            `logprob`
+        """
         encoded = self.encode(text)
         offsets = [0] * len(encoded['input_ids'])
         return encoded, offsets
     
     def prime_text(self, preamble: Union[str, List[str]], stimuli: Union[str, List[str]]) -> Tuple:
+        """
+        Prepares a batch of input text into a format fit to run LM
+        scoring on. 
+
+        :param text: batch of sentences to be prepared for scoring.
+        :return: Batch of formatted input that can be passed to
+            `logprob`
+        """
         preamble_text = [preamble] if isinstance(preamble, str) else preamble
         preamble_encoded = self.encode(preamble_text, False)['input_ids']
         preamble_lens = []
@@ -358,6 +502,14 @@ class IncrementalLMScorer(LMScorer):
         return self.encode(sentences), preamble_lens
     
     def distribution(self, batch: Iterable) -> torch.Tensor:
+        """
+        Returns a distribution over the vocabulary of the model.
+
+        :param `Iterable` batch: A batch of inputs fit to pass to a
+            transformer LM.
+
+        :return: Tensor consisting of log probabilies over vocab items.
+        """
         batch, offsets = batch
         ids = batch["input_ids"]
         ids = ids.to(self.device)
@@ -393,7 +545,18 @@ class IncrementalLMScorer(LMScorer):
 
 
     def logprobs(self, batch: Iterable, rank = False) -> Union[float, List[float]]:
-        
+        """
+        Returns log probabilities
+
+        :param `Iterable` batch: A batch of inputs fit to pass to a
+            transformer LM.
+        :param rank: Specifies whether to also return ranks of words.
+        :type rank: bool
+
+        :return: List of LM score metrics (probability and rank)
+            and tokens.
+        :rtype: Union[List[Tuple[torch.Tensor, str]], List[Tuple[torch.Tensor, str, int]]]
+        """
         batch, offsets = batch
         ids = batch["input_ids"]
         ids = ids.to(self.device)

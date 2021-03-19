@@ -5,9 +5,22 @@ from .utils import find_pattern, find_index, find_paired_indices
 from transformers import AutoModel, AutoTokenizer
 import torch
 
-class CWE():
-    def __init__(self, model_name: str, device: str = 'cpu') -> None:
-
+class CWE(object):
+    """
+    Implements the contextualized word embedding class to
+    facilitate extraction of word representations form a given
+    transformer model.
+    """
+    def __init__(self, model_name: str, device: Optional[str] = 'cpu') -> None:
+        """
+        :param model_name: name of the model, should either be a path
+            to a model (.pt or .bin file) stored locally, or a
+            pretrained model stored on the Huggingface Model Hub.
+        :type model_name: str
+        :param device: device type that the model should be loaded on,
+            options: `cpu or cuda:{0, 1, ...}`
+        :type device: str, optional
+        """
         self.device = device
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast = True, add_prefix_space = True)
         self.model = AutoModel.from_pretrained(model_name, return_dict = True, output_hidden_states = True)
@@ -23,7 +36,15 @@ class CWE():
         self.model.eval()
 
     def encode_text(self, text: Union[str, List[str]], layer: int = None) -> Tuple:
+        """
+        Encodes batch of raw sentences using the model to return hidden
+        states at a given layer.
 
+        :param ``Union[str, List[str]]`` text: batch of raw sentences
+        :param layer: layer from which the hidden states are extracted.
+        :type layer: int
+        :return: Tuple `(input_ids, hidden_states)`
+        """
         sentences = [text] if isinstance(text, str) else text
 
         # Encode sentence into ids stored in the model's embedding layer(s).
@@ -35,7 +56,7 @@ class CWE():
         # Compute hidden states for the sentence for the given layer.
         output = self.model(**encoded)
 
-#         # Hidden states appear as the last element of the otherwise custom hidden_states object
+        # Hidden states appear as the last element of the otherwise custom hidden_states object
         if layer != 'all':
             if layer is None:
                 layer = self.layers
@@ -60,9 +81,20 @@ class CWE():
     
     # A function that extracts the representation of a given word in a sentence (first occurrence only)
 
-    def extract_representation(self, text, layer:int = None) -> Union[torch.Tensor, List[torch.Tensor]]:
-        
-        sentences = [text] if isinstance(text[0], str) else text
+    def extract_representation(self, sentence_words: Union[Tuple[str], List[Tuple[str]]], layer:int = None) -> Union[torch.Tensor, List[torch.Tensor]]:
+        """
+        Extract representations from the model at a given layer.
+
+        :param ``Union[Tuple[str], List[Tuple[str]]]`` text: Input 
+            consisting of `[(sentence, word)]`, where sentence is an
+            input sentence, and word is a word present in the sentence
+            that will be masked out.
+        :param layer: layer from which the hidden states are extracted.
+        :type layer: int
+        :return: torch tensors or list of torch
+            tensors corresponding to word representations
+        """
+        sentences = [sentence_words] if isinstance(sentence_words[0], str) else sentence_words
 
         num_inputs = len(sentences)
 
@@ -86,11 +118,22 @@ class CWE():
         
         return representations
 
-    def extract_paired_representations(self, text, layer:int = None) -> Union[torch.Tensor, List[torch.Tensor]]:
+    def extract_paired_representations(self, sentence_words: Union[Tuple[str], List[Tuple[str]]], layer:int = None) -> Tuple:
         '''
-            Given input of the form (<sentence>, <word1>, <word2>) produce paired tensors that represent the words in the sentence, as encoded by the model
+        Extract representations of pairs of words from a given sentence
+        from the model at a given layer.
+
+        :param ``Union[Tuple[str], List[Tuple[str]]]`` text: Input 
+            consisting of `[(sentence, word1, word2)]`, where sentence
+            is an input sentence, and word1, word2 are two words
+            present in the sentence that will be masked out.
+        :param layer: layer from which the representations are 
+            extracted.
+        :type layer: int
+        :return: Tuple consisting of torch tensors or lists of torch
+            tensors corresponding to word representations
         '''
-        sentences = [text] if isinstance(text[0], str) else text
+        sentences = [sentence_words] if isinstance(sentence_words[0], str) else sentence_words
 
         num_inputs = len(sentences)
 

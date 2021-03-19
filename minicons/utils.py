@@ -48,7 +48,7 @@ def edit_distance(word1: str, word2: str) -> int:
 def argmin(lst: List) -> int:
     return min(range(len(lst)), key=lambda x: lst[x])
   
-def find_index(context: str, word: str, method: Optional[str] = "regular") -> int:
+def find_index(context: str, word: str, method: Optional[str] = "regular") -> Tuple[int, int]:
     if method == "edit":
         tokenized = context.split()
         editdists = [edit_distance(w, word) for w in tokenized]
@@ -70,7 +70,7 @@ def find_index(context: str, word: str, method: Optional[str] = "regular") -> in
 def gen_words(length: int) -> str:
     return " ".join([char for char in string.ascii_lowercase[0:length]])
 
-def find_paired_indices(context: str, word1: str, word2: str, importance: int = 1) -> List[int]:
+def find_paired_indices(context: str, word1: str, word2: str, importance: int = 1) -> Tuple[Tuple[int, int], Tuple[int, int]]:
     if importance == 1:
         idx1 = find_index(context, word1)
         replace_cand = gen_words(len(word1.split()))
