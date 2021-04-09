@@ -13,9 +13,11 @@ Converting this into a hypothesis dealing with surprisals, the model should ther
 `minicons` helps in performing such experiments:
 
 ```py
-import minicons
+from minicons import scorer
 import torch
 from torch.utils.data import DataLoader
+
+import numpy as np
 
 import json
 ```

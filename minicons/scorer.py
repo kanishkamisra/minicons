@@ -219,9 +219,13 @@ class MaskedLMScorer(LMScorer):
         word_idx = self.tokenizer(words, add_special_tokens=False)['input_ids']
         with torch.no_grad():
             masked_logits = self.model(**encoded).logits[torch.arange(length)[:, None], idx].squeeze().detach()
-            logprobs = masked_logits - masked_logits.logsumexp(1).unsqueeze(1)
-            masked_logprobs = logprobs[torch.arange(2)[:, None], word_idx].exp().squeeze()
-        
+            if len(sentences) > 1:
+                logprobs = masked_logits - masked_logits.logsumexp(1).unsqueeze(1)
+                masked_logprobs = logprobs[torch.arange(len(sentences))[:, None], word_idx].exp().squeeze()
+            else:
+                logprobs = masked_logits - masked_logits.logsumexp(0)
+                masked_logprobs = logprobs[word_idx].exp().squeeze()
+
         return masked_logprobs
 
 
@@ -277,7 +281,7 @@ class MaskedLMScorer(LMScorer):
                 
                 attention_masked_list.append(attention_masked)
                 token_ids_masked_list.append(token_ids_masked)
-            masked_tensors.append((torch.stack(token_ids_masked_list), torch.stack(attention_masked_list), effective_token_ids, len(mask_indices), 0))
+            masked_tensors.append((torch.stack(token_ids_masked_list), torch.stack(attention_masked_list), effective_token_ids, len(mask_indices), 1))
         
         return masked_tensors
 
@@ -465,7 +469,7 @@ class IncrementalLMScorer(LMScorer):
         :rtype: Union[float, List[float]]:
         """
         sentences = [text] if isinstance(text, str) else text
-        sentences = [self.tokenizer.bos_token + " " + sentence for sentence in sentences]
+        sentences = [self.tokenizer.bos_token + sentence for sentence in sentences]
 
         return sentences
     
