@@ -1,6 +1,7 @@
 import random
 import re
 import string
+import torch
 
 from typing import List, Tuple, Optional
 
@@ -47,6 +48,9 @@ def edit_distance(word1: str, word2: str) -> int:
 
 def argmin(lst: List) -> int:
     return min(range(len(lst)), key=lambda x: lst[x])
+
+def argmax(lst: List) -> int:
+    return max(range(len(lst)), key=lambda x: lst[x])
   
 def find_index(context: str, word: str, method: Optional[str] = "regular") -> Tuple[int, int]:
     if method == "edit":

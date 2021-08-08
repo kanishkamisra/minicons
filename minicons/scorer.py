@@ -3,6 +3,8 @@ from typing import Iterable, Union, List, Dict, Optional, Callable, Tuple, Any
 import torch
 from transformers import AutoModelForCausalLM, AutoModelForMaskedLM, AutoTokenizer
 
+from collections import defaultdict
+
 from itertools import chain
 from re import sub
 
@@ -23,13 +25,39 @@ class LMScorer:
         """
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast = True)
         self.device = device
-        self.vocab = [(x.strip(), i) for x, i in [(self.tokenizer.decode([i]), i) for i in range(self.tokenizer.vocab_size)] if " " in x and x.islower()]
+        self.vocab = defaultdict(list)
+        {self.vocab[x.strip()].append(i) for x, i in [(self.tokenizer.decode([i]), i) for i in range(self.tokenizer.vocab_size)]}
 
     def add_special_tokens(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
         raise NotImplementedError
     
     def distribution(self, batch: Iterable) -> torch.Tensor:
         raise NotImplementedError
+    
+    def topk(self, distribution: torch.Tensor, k: int = 1) -> Tuple:
+        top_k = distribution.topk(k)
+    
+        probs = top_k.values.squeeze(1).exp().tolist()
+        if k == 1:
+            tokens = self.decode(top_k.indices.squeeze(1))
+        else:
+            tokens = [self.decode(x) for x in top_k.indices.squeeze(1)]
+    
+        return tokens, probs
+
+    def query(self, distribution: torch.Tensor, queries: List[str]) -> Tuple:
+        # this will be self.vocab tho
+        query_ids = [self.vocab[a] for a in queries]
+        maxlen = max(map(len, query_ids))
+        query_ids = [q + [self.tokenizer.pad_token_id] * (maxlen - len(q)) if len(q) < maxlen else q for q in query_ids]
+        current_batch_size = distribution.shape[0]
+        probs = distribution[torch.arange(current_batch_size)[:, None], query_ids].max(1).values.exp().tolist()
+        
+        inv_ranks = distribution.argsort().argsort() + 1
+        ranks = distribution.shape[1] - inv_ranks + 1
+        token_ranks = ranks[torch.arange(current_batch_size)[:, None], query_ids].min(1).values.tolist()
+    
+        return probs, token_ranks
 
     def logprobs(self, batch: Iterable, rank: bool = False) -> Union[float, List[float]]:
         raise NotImplementedError
@@ -377,6 +405,44 @@ class MaskedLMScorer(LMScorer):
 
         return logits
 
+    def cloze_distribution(self, queries: Iterable) -> torch.Tensor:
+    
+        '''
+        Accepts as input batch of [(s_i, bw_i)] where s_i is a prompt with an
+        abstract token (bw_i) representing a blank word and returns a distribution
+        over the vocabulary of the model.
+
+        :param `Iterable` queries: A batch of [(s_i, bw_i)] where s_i is a prompt
+            with an abstract token (bw_i) representing a blank word
+
+        :return: Tensor contisting of log probabilities over vocab items.
+        '''
+        
+        queries = [queries] if isinstance(queries[0], str) else queries
+        prompts, words = list(zip(*queries))
+            
+        modified_prompts = self.add_special_tokens(prompts)
+        splits = [prompt.split(word) for prompt, word in zip(modified_prompts, words)]
+        splits = [[x.strip() for x in s] for s in splits]
+        pre, post = list(zip(*splits))
+        pre_idx = self.tokenizer(list(pre), add_special_tokens = False, padding=False)['input_ids']
+        mask_idx = [len(item) for item in pre_idx]
+        masked = [m.replace(w, self.tokenizer.mask_token) for m, w in zip(modified_prompts, words)]
+        
+        with torch.no_grad():
+            encoded = self.tokenizer(masked, add_special_tokens = False, return_tensors='pt', padding = True)
+            encoded = encoded.to(self.device)
+            logits = self.model(**encoded)
+            presoftmax = logits.logits[torch.arange(len(queries)), mask_idx]
+            if 'cuda' in self.device:
+                presoftmax = presoftmax.detach().cpu()
+            else:
+                presoftmax = presoftmax.detach()
+            
+        logprobs = presoftmax - presoftmax.logsumexp(1).unsqueeze(1)
+        
+        return logprobs    
+
     def logprobs(self, batch: Iterable, rank = False) -> Union[List[Tuple[torch.Tensor, str]], List[Tuple[torch.Tensor, str, int]]]:
         """
         Returns log probabilities
@@ -547,6 +613,12 @@ class IncrementalLMScorer(LMScorer):
             outputs.append(sent_logits[-1])
         return torch.stack(outputs, 0)
 
+    def next_word_distribution(self, queries: List):
+        encoded = self.prime_text(queries, ['the'] * len(queries))
+        logits = self.distribution(encoded)
+        logprobs = logits - logits.logsumexp(1).unsqueeze(1)
+        
+        return logprobs
 
     def logprobs(self, batch: Iterable, rank = False) -> Union[float, List[float]]:
         """

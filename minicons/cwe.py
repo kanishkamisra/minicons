@@ -22,7 +22,7 @@ class CWE(object):
         :type device: str, optional
         """
         self.device = device
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast = True, add_prefix_space = True)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast = True)
         self.model = AutoModel.from_pretrained(model_name, return_dict = True, output_hidden_states = True)
 
         self.layers = self.model.config.num_hidden_layers
@@ -57,25 +57,35 @@ class CWE(object):
         output = self.model(**encoded)
 
         # Hidden states appear as the last element of the otherwise custom hidden_states object
-        if layer != 'all':
-            if layer is None:
-                layer = self.layers
-            elif layer > self.layers:
-                raise ValueError(f"Number of layers specified ({layer}) exceed layers in model ({self.layers})!")
-            hidden_states = output.hidden_states[layer]
-            if "cuda" in self.device:
-                input_ids = input_ids.cpu()
-                hidden_states = hidden_states.detach().cpu()
-            else:
-                hidden_states = hidden_states.detach()
-        else:
+        if isinstance(layer, list):
             hidden_states = output.hidden_states
-        
             if "cuda" in self.device:
                 input_ids = input_ids.cpu()
                 hidden_states = [h.detach().cpu() for h in hidden_states]
             else:
                 hidden_states = [h.detach() for h in hidden_states]
+            
+            hidden_states = [hidden_states[i] for i in sorted(layer)]
+        else:
+            if layer != 'all':
+                if layer is None:
+                    layer = self.layers
+                elif layer > self.layers:
+                    raise ValueError(f"Number of layers specified ({layer}) exceed layers in model ({self.layers})!")
+                hidden_states = output.hidden_states[layer]
+                if "cuda" in self.device:
+                    input_ids = input_ids.cpu()
+                    hidden_states = hidden_states.detach().cpu()
+                else:
+                    hidden_states = hidden_states.detach()
+            else:
+                hidden_states = output.hidden_states
+            
+                if "cuda" in self.device:
+                    input_ids = input_ids.cpu()
+                    hidden_states = [h.detach().cpu() for h in hidden_states]
+                else:
+                    hidden_states = [h.detach() for h in hidden_states]
 
         return input_ids, hidden_states
     
@@ -107,14 +117,17 @@ class CWE(object):
 
         query_idx = list(map(lambda x: find_pattern(x[0], x[1]), zip(search_queries, input_ids.tolist())))
 
-        if layer != 'all':
-            if layer is None:
-                layer = self.layers
-            elif layer > self.layers:
-                raise ValueError(f"Number of layers specified ({layer}) exceed layers in model ({self.layers})!")
-            representations = hidden_states[torch.arange(num_inputs)[:, None], query_idx].mean(1)
-        else:
+        if isinstance(layer, list):
             representations = list(map(lambda x: x[torch.arange(num_inputs)[:, None], query_idx].mean(1), hidden_states))
+        else:
+            if layer != 'all':
+                if layer is None:
+                    layer = self.layers
+                elif layer > self.layers:
+                    raise ValueError(f"Number of layers specified ({layer}) exceed layers in model ({self.layers})!")
+                representations = hidden_states[torch.arange(num_inputs)[:, None], query_idx].mean(1)
+            else:
+                representations = list(map(lambda x: x[torch.arange(num_inputs)[:, None], query_idx].mean(1), hidden_states))
         
         return representations
 
