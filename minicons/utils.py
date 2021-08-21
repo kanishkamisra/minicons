@@ -2,6 +2,7 @@ import random
 import re
 import string
 import torch
+from polyleven import levenshtein
 
 from typing import List, Tuple, Optional
 
@@ -26,7 +27,7 @@ def find_pattern(pieces: List, whole: List) -> Tuple:
     num_pieces = len(pieces)
     for i in (j for j,entry in enumerate(whole) if entry == pieces[0]):
         if whole[i:i+num_pieces] == pieces:
-            return i, i+num_pieces-1
+            return i, i+num_pieces
 
 def edit_distance(word1: str, word2: str) -> int:
     m, n = len(word1), len(word2) 

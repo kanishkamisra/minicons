@@ -24,6 +24,7 @@ class CWE(object):
         self.device = device
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast = True)
         self.model = AutoModel.from_pretrained(model_name, return_dict = True, output_hidden_states = True)
+        self.dimensions = list(self.model.parameters())[-1].shape[0]
 
         self.layers = self.model.config.num_hidden_layers
 
@@ -35,7 +36,7 @@ class CWE(object):
         self.model.to(self.device)
         self.model.eval()
 
-    def encode_text(self, text: Union[str, List[str]], layer: int = None) -> Tuple:
+    def encode_text(self, text: Union[str, List[str]], layer: Union[int, List[int]] = None) -> Tuple:
         """
         Encodes batch of raw sentences using the model to return hidden
         states at a given layer.
@@ -57,35 +58,35 @@ class CWE(object):
         output = self.model(**encoded)
 
         # Hidden states appear as the last element of the otherwise custom hidden_states object
-        if isinstance(layer, list):
+        if isinstance(layer, list) or layer == 'all':
             hidden_states = output.hidden_states
             if "cuda" in self.device:
                 input_ids = input_ids.cpu()
                 hidden_states = [h.detach().cpu() for h in hidden_states]
             else:
                 hidden_states = [h.detach() for h in hidden_states]
-            
-            hidden_states = [hidden_states[i] for i in sorted(layer)]
-        else:
             if layer != 'all':
-                if layer is None:
-                    layer = self.layers
-                elif layer > self.layers:
-                    raise ValueError(f"Number of layers specified ({layer}) exceed layers in model ({self.layers})!")
-                hidden_states = output.hidden_states[layer]
-                if "cuda" in self.device:
-                    input_ids = input_ids.cpu()
-                    hidden_states = hidden_states.detach().cpu()
-                else:
-                    hidden_states = hidden_states.detach()
+                hidden_states = [hidden_states[i] for i in sorted(layer)]
+        else:
+            # if layer != 'all':
+            if layer is None:
+                layer = self.layers
+            elif layer > self.layers:
+                raise ValueError(f"Number of layers specified ({layer}) exceed layers in model ({self.layers})!")
+            hidden_states = output.hidden_states[layer]
+            if "cuda" in self.device:
+                input_ids = input_ids.cpu()
+                hidden_states = hidden_states.detach().cpu()
             else:
-                hidden_states = output.hidden_states
+                hidden_states = hidden_states.detach()
+            # else:
+            #     hidden_states = output.hidden_states
             
-                if "cuda" in self.device:
-                    input_ids = input_ids.cpu()
-                    hidden_states = [h.detach().cpu() for h in hidden_states]
-                else:
-                    hidden_states = [h.detach() for h in hidden_states]
+            #     if "cuda" in self.device:
+            #         input_ids = input_ids.cpu()
+            #         hidden_states = [h.detach().cpu() for h in hidden_states]
+            #     else:
+            #         hidden_states = [h.detach() for h in hidden_states]
 
         return input_ids, hidden_states
     
@@ -117,17 +118,16 @@ class CWE(object):
 
         query_idx = list(map(lambda x: find_pattern(x[0], x[1]), zip(search_queries, input_ids.tolist())))
 
-        if isinstance(layer, list):
-            representations = list(map(lambda x: x[torch.arange(num_inputs)[:, None], query_idx].mean(1), hidden_states))
+        if isinstance(layer, list) or layer == 'all':
+            # representations = list(map(lambda x: x[torch.arange(num_inputs)[:, None], query_idx].mean(1), hidden_states))
+            representations = list(map(lambda x: torch.stack([hs.squeeze()[idx[0]:idx[1]].mean(0) for hs, idx in zip(x.split([1] * num_inputs), query_idx)]), hidden_states))
         else:
-            if layer != 'all':
-                if layer is None:
-                    layer = self.layers
-                elif layer > self.layers:
-                    raise ValueError(f"Number of layers specified ({layer}) exceed layers in model ({self.layers})!")
-                representations = hidden_states[torch.arange(num_inputs)[:, None], query_idx].mean(1)
-            else:
-                representations = list(map(lambda x: x[torch.arange(num_inputs)[:, None], query_idx].mean(1), hidden_states))
+            if layer is None:
+                layer = self.layers
+            elif layer > self.layers:
+                raise ValueError(f"Number of layers specified ({layer}) exceed layers in model ({self.layers})!")
+            # representations = hidden_states[torch.arange(num_inputs)[:, None], query_idx].mean(1)
+            representations = torch.stack([hs.squeeze()[idx[0]:idx[1]].mean(0) for hs, idx in zip(hidden_states.split([1] * num_inputs), query_idx)])
         
         return representations
 
@@ -166,10 +166,10 @@ class CWE(object):
                 layer = self.layers
             elif layer > self.layers:
                 raise ValueError(f"Number of layers specified ({layer}) exceed layers in model ({self.layers})!")
-            representations1 = hidden_states[torch.arange(num_inputs)[:, None], query_idx1].mean(1)
-            representations2 = hidden_states[torch.arange(num_inputs)[:, None], query_idx2].mean(1)
+            representations1 = torch.stack([hs.squeeze()[idx[0]:idx[1]].mean(0) for hs, idx in zip(hidden_states.split([1] * num_inputs), query_idx1)])
+            representations2 = torch.stack([hs.squeeze()[idx[0]:idx[1]].mean(0) for hs, idx in zip(hidden_states.split([1] * num_inputs), query_idx2)])
         else:
-            representations1 = list(map(lambda x: x[torch.arange(num_inputs)[:, None], query_idx1].mean(1), hidden_states))
-            representations2 = list(map(lambda x: x[torch.arange(num_inputs)[:, None], query_idx2].mean(1), hidden_states))
+            representations1 = list(map(lambda x: torch.stack([hs.squeeze()[idx[0]:idx[1]].mean(0) for hs, idx in zip(x.split([1] * num_inputs), query_idx1)]), hidden_states))
+            representations2 = list(map(lambda x: torch.stack([hs.squeeze()[idx[0]:idx[1]].mean(0) for hs, idx in zip(x.split([1] * num_inputs), query_idx2)]), hidden_states))
         
         return representations1, representations2
