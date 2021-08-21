@@ -114,7 +114,13 @@ class CWE(object):
         if isinstance(sentences[0][1], str):
             sentences = [(s, find_index(s, w)) for s, w in sentences]
     
-        search_queries = [self.tokenizer.encode_plus(f'{" ".join(s.split()[idx[0]:idx[1]])}', add_special_tokens = False)['input_ids'] for s, idx in sentences]
+        search_queries = []
+        for s, idx in sentences:
+            if 0 in idx:
+                search_queries.append(self.tokenizer.encode_plus(f'{" ".join(s.split()[idx[0]:idx[1]])}', add_special_tokens = False)['input_ids'])
+            else:
+                ## this one really matters if we are using GPT2
+                search_queries.append(self.tokenizer.encode_plus(f' {" ".join(s.split()[idx[0]:idx[1]])}', add_special_tokens = False)['input_ids'])
 
         query_idx = list(map(lambda x: find_pattern(x[0], x[1]), zip(search_queries, input_ids.tolist())))
 
@@ -155,8 +161,24 @@ class CWE(object):
         if isinstance(sentences[0][1], str):
             sentences = [(s, *find_paired_indices(s, w1, w2)) for s, w1, w2 in sentences]
         
-        search_queries1 = [self.tokenizer.encode_plus(f'{" ".join(s.split()[idx1[0]:idx1[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
-        search_queries2 = [self.tokenizer.encode_plus(f'{" ".join(s.split()[idx2[0]:idx2[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
+        search_queries1 = []
+        for s, idx1, idx2 in sentences:
+            if 0 in idx1:
+                search_queries1.append(self.tokenizer.encode_plus(f'{" ".join(s.split()[idx1[0]:idx1[1]])}', add_special_tokens = False)['input_ids'])
+            else:
+                ## this one really matters if we are using GPT2
+                search_queries1.append(self.tokenizer.encode_plus(f' {" ".join(s.split()[idx1[0]:idx1[1]])}', add_special_tokens = False)['input_ids'])
+
+        search_queries2 = []
+        for s, idx1, idx2 in sentences:
+            if 0 in idx2:
+                search_queries2.append(self.tokenizer.encode_plus(f'{" ".join(s.split()[idx2[0]:idx2[1]])}', add_special_tokens = False)['input_ids'])
+            else:
+                ## this one really matters if we are using GPT2
+                search_queries2.append(self.tokenizer.encode_plus(f' {" ".join(s.split()[idx2[0]:idx2[1]])}', add_special_tokens = False)['input_ids'])
+
+        # search_queries1 = [self.tokenizer.encode_plus(f'{" ".join(s.split()[idx1[0]:idx1[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
+        # search_queries2 = [self.tokenizer.encode_plus(f'{" ".join(s.split()[idx2[0]:idx2[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
 
         query_idx1 = list(map(lambda x: find_pattern(x[0], x[1]), zip(search_queries1, input_ids.tolist())))
         query_idx2 = list(map(lambda x: find_pattern(x[0], x[1]), zip(search_queries2, input_ids.tolist())))
