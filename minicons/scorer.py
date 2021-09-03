@@ -62,13 +62,16 @@ class LMScorer:
     def logprobs(self, batch: Iterable, rank: bool = False) -> Union[float, List[float]]:
         raise NotImplementedError
 
+    def compute_stats(self, batch: Iterable, rank: bool = False) -> Union[Union[float, int], List[Union[float, int]]]:
+        raise NotImplementedError
+
     def prepare_text(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
         raise NotImplementedError
 
     def prime_text(self, preamble: Union[str, List[str]], stimuli: Union[str, List[str]]) -> Tuple:
         raise NotImplementedError
 
-    def seq_score(self, batch: Iterable):
+    def token_score(self, batch: Iterable, ranks: bool = False):
         raise NotImplementedError
     
     def score(self, batch: Union[str, List[str]], pool: Callable = torch.mean, *args) -> Union[float, List[float]]:
@@ -538,6 +541,10 @@ class IncrementalLMScorer(LMScorer):
         sentences = [self.tokenizer.bos_token + sentence for sentence in sentences]
 
         return sentences
+
+    def encode(self, text: Union[str, List[str]]) -> dict:
+        text = [text] if isinstance(text, str) else text
+        return self.tokenizer(text, return_tensors='pt', padding = True)
     
     def prepare_text(self, text: Union[str, List[str]]) -> Tuple:
         """
@@ -546,7 +553,7 @@ class IncrementalLMScorer(LMScorer):
 
         :param text: batch of sentences to be prepared for scoring.
         :return: Batch of formatted input that can be passed to
-            `logprob`
+            `compute_stats`
         """
         encoded = self.encode(text)
         offsets = [0] * len(encoded['input_ids'])
@@ -559,13 +566,13 @@ class IncrementalLMScorer(LMScorer):
 
         :param text: batch of sentences to be prepared for scoring.
         :return: Batch of formatted input that can be passed to
-            `logprob`
+            `compute_stats`
         """
         preamble_text = [preamble] if isinstance(preamble, str) else preamble
-        preamble_encoded = self.encode(preamble_text, False)['input_ids']
+        preamble_encoded = self.tokenizer(preamble_text)['input_ids']
         preamble_lens = []
         for preamble_tokens in preamble_encoded:
-            preamble_lens.append(len([token for token in preamble_tokens if token != self.tokenizer.pad_token_id and token != self.tokenizer.sep_token_id]))
+            preamble_lens.append(len([token for token in preamble_tokens if token != self.tokenizer.pad_token_id and token != self.tokenizer.sep_token_id]) - 1)
         
         sentences = [preamble + " " + stimuli] if isinstance(preamble, str) else [p + " " + s for p , s in list(zip(preamble, stimuli))]
             
@@ -600,7 +607,7 @@ class IncrementalLMScorer(LMScorer):
             sent_tokens = [
                 tok
                 for i, tok in enumerate(batch.tokens(sent_index))
-                if sent_nopad_mask[i] and i > offsets[sent_index]
+                if sent_nopad_mask[i] and i > offsets[sent_index] + 1
             ]
 
             # sent_ids.shape = [len(text[sent_index]) + 1]
@@ -614,11 +621,60 @@ class IncrementalLMScorer(LMScorer):
         return torch.stack(outputs, 0)
 
     def next_word_distribution(self, queries: List):
-        encoded = self.prime_text(queries, ['the'] * len(queries))
-        logits = self.distribution(encoded)
+        '''
+        Returns the log probability distribution of the next word.
+        '''
+        encoded = self.encode(queries)
+        query_ids = [[j for j, i in enumerate(instance) if i != self.tokenizer.pad_token_id][-1] for instance in encoded['input_ids'].tolist()]
+
+        logits = self.model(**encoded).logits.detach()
+        logits[:, :, self.tokenizer.pad_token_id] = float("-inf")
+
+        logits = logits[torch.arange(len(query_ids)), query_ids]
         logprobs = logits - logits.logsumexp(1).unsqueeze(1)
         
         return logprobs
+
+    def compute_stats(self, batch: Iterable, rank: bool = False):
+        
+        encoded, offsets = batch
+        
+        ids = [[i for i in instance if i != self.tokenizer.pad_token_id] for instance in encoded['input_ids'].tolist()]
+
+        ## Ignore the probabilities of the first token.
+        effective_ids = [id[1:] for id in ids]
+
+        logits = self.model(**encoded).logits.detach()
+        logits[:, :, self.tokenizer.pad_token_id] = float("-inf")
+
+        logits = logits.split([1]*len(offsets))
+
+        ## Set up storage variables
+        logprobs = []
+        if rank:
+            ranks = []
+
+        for logit, idx, offset in zip(logits, effective_ids, offsets):
+            length = len(idx)
+            logit = logit.squeeze(0)[:, :-1][torch.arange(offset, length),]
+
+            logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
+            query_ids = idx[offset:]
+            logprob = logprob_distribution[torch.arange(length - offset), query_ids].tolist()
+
+            if rank:
+                shape = logprob_distribution.shape
+                inv_ranks = logprob_distribution.argsort().argsort() + 1
+                word_ranks = shape[1] - inv_ranks + 1
+                word_ranks = word_ranks[torch.arange(length - offset), query_ids].tolist()
+                ranks.append(word_ranks)
+
+            logprobs.append(logprob)
+        
+        if rank:
+            return logprobs, ranks
+        else:
+            return logprobs
 
     def logprobs(self, batch: Iterable, rank = False) -> Union[float, List[float]]:
         """
