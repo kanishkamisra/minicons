@@ -477,8 +477,9 @@ class MaskedLMScorer(LMScorer):
             sent_log_probs = logits - logits.logsumexp(1).unsqueeze(1)
             if rank:
                 shape = sent_log_probs.shape
-                inv_ranks = (sent_log_probs).argsort().argsort() + 1
-                ranks = shape[1] - inv_ranks + 1
+                # inv_ranks = (sent_log_probs).argsort().argsort() + 1
+                # ranks = shape[1] - inv_ranks + 1
+                ranks = (-1.0 * sent_log_probs).argsort().argsort() + 1
                 word_ranks = ranks[torch.arange(shape[0]), effective_token_ids].split(lengths)
             sent_log_probs = sent_log_probs[torch.arange(sum(lengths)), effective_token_ids].type(torch.DoubleTensor).split(lengths)
             # sentence_scores = list(map(lambda x: x.sum().tolist(), logprobs))
@@ -635,7 +636,7 @@ class IncrementalLMScorer(LMScorer):
         
         return logprobs
 
-    def compute_stats(self, batch: Iterable, rank: bool = False):
+    def compute_stats(self, batch: Iterable, rank: bool = False, base_two: bool = False, return_tensors = False) -> Union[Tuple[List[float], List[float]], List[float]]:
         
         encoded, offsets = batch
         
@@ -660,18 +661,40 @@ class IncrementalLMScorer(LMScorer):
 
             logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
             query_ids = idx[offset:]
-            logprob = logprob_distribution[torch.arange(length - offset), query_ids].tolist()
+            if base_two:
+                '''
+                Log_2(X) = log_e(X)/log_e(2) (broadcasted)
+                '''
+                logprob = (logprob_distribution[torch.arange(length - offset), query_ids] / torch.tensor(2).log()).tolist()
+            else:
+                logprob = logprob_distribution[torch.arange(length - offset), query_ids].tolist()
 
             if rank:
-                shape = logprob_distribution.shape
-                inv_ranks = logprob_distribution.argsort().argsort() + 1
-                word_ranks = shape[1] - inv_ranks + 1
+                # shape = logprob_distribution.shape
+                '''
+                Double argsort trick:
+                first argsort returns idxes of values that would return a sorted tensor,
+                second argsort returns ranks (0 indexed)
+
+                Proof: https://www.berkayantmen.com/rank.html
+
+                TODO: Try to implement ranking in linear time but across arbitrary dimensions:
+                https://stackoverflow.com/a/5284703
+                '''
+                word_ranks = (-1.0 * logprob_distribution).argsort().argsort() + 1
+                # inv_ranks = logprob_distribution.argsort().argsort() + 1
+                # word_ranks = shape[1] - inv_ranks + 1
                 word_ranks = word_ranks[torch.arange(length - offset), query_ids].tolist()
                 ranks.append(word_ranks)
 
             logprobs.append(logprob)
+
+        if return_tensors:
+            logprobs = torch.tensor(logprobs)
         
         if rank:
+            if return_tensors:
+                ranks = torch.tensor(ranks)
             return logprobs, ranks
         else:
             return logprobs

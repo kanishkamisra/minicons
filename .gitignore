@@ -1,5 +1,6 @@
 # remove example sandbox
 example.ipynb
+sandbox.ipynb
 
 # remove vscode
 .vscode/
