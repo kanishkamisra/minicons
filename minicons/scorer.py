@@ -699,6 +699,50 @@ class IncrementalLMScorer(LMScorer):
         else:
             return logprobs
 
+    def sequence_score(self, batch, reduction = lambda x: x.mean(1), base_two = False):
+        tokenized = self.prepare_text(batch)
+        scores = self.compute_stats(tokenized, rank = False, base_two = base_two, return_tensors = True)
+        reduced = reduction(scores)
+        return reduced
+
+    def token_score(self, batch, surprisal = False, base_two = False, rank = False):
+        '''
+        returns a tuple of tokens, their corresponding log probabilities/surprisals, and their ranks (optional)
+        '''
+        tokenized = self.prepare_text(batch)
+        if rank:
+            scores, ranks = self.compute_stats(tokenized, rank = rank, base_two = base_two, return_tensors = True)
+            ranks = ranks.tolist()
+        else:
+            scores = self.compute_stats(tokenized, base_two = base_two, return_tensors = True)
+
+        if surprisal:
+            scores = -1.0 * scores
+
+        scores = scores.tolist()
+
+        tokens = [self.decode(idx) for idx in tokenized[0]['input_ids']]
+
+        assert len(tokens) == len(scores) == len(ranks)
+
+        res = []
+        if rank:
+            for t, s, r in zip(tokens, scores, ranks):
+                if len(t) > len(s):
+                    diff = len(t) - len(s)
+                    sc = [0.0]*diff + s
+                    ra = [0]*diff + r
+                    res.append(list(zip(t, sc, ra)))
+            # return [list(zip(t, s, r)) for t, s, r in zip(tokens, scores, ranks)]
+        else:
+            for t, s in zip(tokens, scores):
+                if len(t) > len(s):
+                    diff = len(t) - len(s)
+                    sc = [0.0]*diff + s
+                    res.append(list(zip(t, sc)))
+
+        return res
+
     def logprobs(self, batch: Iterable, rank = False) -> Union[float, List[float]]:
         """
         Returns log probabilities
