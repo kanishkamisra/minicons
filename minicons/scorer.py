@@ -690,16 +690,19 @@ class IncrementalLMScorer(LMScorer):
             logprobs.append(logprob)
 
         if return_tensors:
-            logprobs = torch.tensor(logprobs)
-        
+            logprobs = [torch.tensor(l) for l in logprobs]
+
         if rank:
             if return_tensors:
-                ranks = torch.tensor(ranks)
+                ranks = [torch.tensor[r] for r in ranks]
             return logprobs, ranks
         else:
             return logprobs
 
     def sequence_score(self, batch, reduction = lambda x: x.mean(1), base_two = False):
+        '''
+        TODO: reduction should be a string, if it's a function, specify what kind of function. --> how to ensure it is always that type?
+        '''
         tokenized = self.prepare_text(batch)
         scores = self.compute_stats(tokenized, rank = False, base_two = base_two, return_tensors = True)
         reduced = reduction(scores)
