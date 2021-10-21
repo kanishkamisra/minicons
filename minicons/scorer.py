@@ -691,10 +691,12 @@ class IncrementalLMScorer(LMScorer):
 
         if return_tensors:
             logprobs = [torch.tensor(l) for l in logprobs]
+            logprobs = torch.stack(logprobs)
 
         if rank:
             if return_tensors:
                 ranks = [torch.tensor[r] for r in ranks]
+                ranks = torch.stack(ranks)
             return logprobs, ranks
         else:
             return logprobs
@@ -726,7 +728,10 @@ class IncrementalLMScorer(LMScorer):
 
         tokens = [self.decode(idx) for idx in tokenized[0]['input_ids']]
 
-        assert len(tokens) == len(scores) == len(ranks)
+        if rank:
+            assert len(tokens) == len(scores) == len(ranks)
+        else:
+            assert len(tokens) == len(scores)
 
         res = []
         if rank:

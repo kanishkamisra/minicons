@@ -40,24 +40,26 @@ tensor([[ 0.5399, -0.2461, -0.0968,  ..., -0.4670, -0.5312, -0.0549],
 '''
 ```
 
-2. Compute sentence acceptability measures (surprisals) using Incremental and Masked Language Models:
+1. Compute sentence acceptability measures (surprisals) using Incremental Language Models:
 
 ```py
 from minicons import scorer
 
-mlm_model = scorer.MaskedLMScorer('bert-base-uncased', 'cpu')
+# Masked LM scoring is temporarily broken. I am working on fixing it asap (date: Oct 21, 2021)
+# mlm_model = scorer.MaskedLMScorer('bert-base-uncased', 'cpu')
 ilm_model = scorer.IncrementalLMScorer('distilgpt2', 'cpu')
 
 stimuli = ["The keys to the cabinet are on the table.",
            "The keys to the cabinet is on the table."]
 
-print(mlm_model.score(stimuli, pool = torch.sum))
+# use sequence_score with different reduction options: 
+# Sequence Surprisal - lambda x: -x.sum(1)
+# Sequence Log-probability - lambda x: x.sum(1)
+# Sequence Surprisal, normalized by number of tokens - lambda x: -x.mean(1)
+# Sequence Log-probability, normalized by number of tokens - lambda x: x.mean(1)
+# and so on...
 
-'''
-[13.962650299072266, 23.41507911682129]
-'''
-
-print(ilm_model.score(stimuli, pool = torch.sum))
+print(ilm_model.sequence_score(stimuli, reduction = lambda x: -x.sum(1)))
 
 '''
 [41.51601982116699, 44.497480392456055]
