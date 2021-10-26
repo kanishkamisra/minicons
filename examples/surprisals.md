@@ -27,41 +27,96 @@ Incremental models can be instantiated using:
 model = scorer.IncrementalLMScorer('gpt2', 'cpu')
 ```
 
-`minicons` allows you to compute token-by-token log-probabilities using the `model.logprobs()` function, which accepts texts encoded by the `model.prepare_text()` function. 
+`minicons` allows you to compute token-by-token log-probabilities using the `model.compute_stats()` function, which accepts texts encoded by the `model.prepare_text()` function. It has the following parameters:
+
+```
+batch [Iterable]: Input batch (list of sentences or single sentence)
+rank [bool]: Whether the model should return ranks of each token (by probability)
+base_two [bool]: Use base 2 for the log-prob
+return_tensors [bool]: Whether the output should contain tensors.
+```
 
 ```py
-logprobs = model.logprobs(model.prepare_text("The sketch of those trucks hasn't"))
+logprobs = model.compute_stats(model.prepare_text("The sketch of those trucks hasn't"))
 
 print(logprobs)
 
-# [(tensor([ -7.6899, -10.9180,  -2.3835,  -5.1761, -12.6967, -12.9571,  -9.4133, -0.0216], dtype=torch.float64), ['ĠThe', 'Ġsketch', 'Ġof', 'Ġthis', 'e', 'Ġtrucks', 'Ġhasn', "'t"])]
+#[[-10.879678726196289, -2.5105514526367188,  -6.6631927490234375,  -8.962379455566406,  -8.681724548339844,  -0.0005340576171875]]
 ```
 
 Note that you can also pass a batch of texts in a list format.
 
 ```py
-logprobs = model.logprobs(model.prepare_text(["The sketch of those trucks hasn't", "The sketch of those trucks haven't"]))
+sentences = ["The sketch of those trucks hasn't", "The sketch of those trucks haven't"]
 
-print(logprobs)
+model.compute_stats(model.prepare_text(sentences))
 
-# [(tensor([-7.6899e+00, -1.0918e+01, -2.3835e+00, -7.2515e+00, -8.8136e+00, -8.7238e+00, -7.0190e-04], dtype=torch.float64), ['ĠThe', 'Ġsketch', 'Ġof', 'Ġthose', 'Ġtrucks', 'Ġhasn', "'t"]), (tensor([-7.6899e+00, -1.0918e+01, -2.3835e+00, -7.2515e+00, -8.8136e+00, -1.0561e+01, -1.3885e-03], dtype=torch.float64), ['ĠThe', 'Ġsketch', 'Ġof', 'Ġthose', 'Ġtrucks', 'Ġhaven', "'t"])]
-
-# Convert log-probabilities into token-by-token surprisals:
-
-surprisals = [-x for x in list(zip(*logprobs))[0]]
-
-print(surprisals)
-
-# [tensor([7.6899e+00, 1.0918e+01, 2.3835e+00, 7.2515e+00, 8.8136e+00, 8.7238e+00, 7.0190e-04], dtype=torch.float64), tensor([7.6899e+00, 1.0918e+01, 2.3835e+00, 7.2515e+00, 8.8136e+00, 1.0561e+01, 1.3885e-03], dtype=torch.float64)]
+# [[-10.879678726196289,
+#  -2.5105514526367188,
+#  -6.6631927490234375,
+#  -8.962379455566406,
+#  -8.681724548339844,
+#  -0.0005340576171875],
+# [-10.879678726196289,
+#  -2.5105514526367188,
+#  -6.6631927490234375,
+#  -8.962379455566406,
+#  -10.669326782226562,
+#  -0.0013275146484375]]
 ```
-
-You can also compute the overall sentence scores by using the `model.score()` function. By default it does so by normalizing the summed log probability score and dividing it by the length. To only get the overall log-probability, one would pass `pool = torch.sum` as an argument:
+To also get tokens in the output use:
 
 ```py
-model.score(["The sketch of those trucks hasn't", "The sketch of those trucks haven't"], pool = torch.sum)
+model.token_score(sentences)
+
+'''
+[[('The', 0.0),
+  ('sketch', -10.879678726196289),
+  ('of', -2.5105514526367188),
+  ('those', -6.6631927490234375),
+  ('trucks', -8.962379455566406),
+  ('hasn', -8.681724548339844),
+  ("'t", -0.0005340576171875)],
+ [('The', 0.0),
+  ('sketch', -10.879678726196289),
+  ('of', -2.5105514526367188),
+  ('those', -6.6631927490234375),
+  ('trucks', -8.962379455566406),
+  ('haven', -10.669326782226562),
+  ("'t", -0.0013275146484375)]]
+'''
+```
+
+For surprisals, pass `surprisal = True` to `model.token_score()` (pass `base_two = True` if you want surprisals in bits)
+
+```py
+model.token_score(sentences, surprisal = True, base_two = True)
+
+'''
+[[('The', 0.0),
+  ('sketch', 15.69605827331543),
+  ('of', 3.621960163116455),
+  ('those', 9.612955093383789),
+  ('trucks', 12.929980278015137),
+  ('hasn', 12.525080680847168),
+  ("'t", 0.0007704822928644717)],
+ [('The', 0.0),
+  ('sketch', 15.69605827331543),
+  ('of', 3.621960163116455),
+  ('those', 9.612955093383789),
+  ('trucks', 12.929980278015137),
+  ('haven', 15.392584800720215),
+  ("'t", 0.0019151987507939339)]]
+'''
+```
+
+You can also compute the overall sentence scores by using the `model.sequence_score()` function. By default it does so by normalizing the summed log probability score and dividing it by the length. To only get the overall log-probability, one would pass `reduction = lambda x: x.sum(1)` (for surprisals pass `lambda x: -x.sum(1)`) as an argument:
+
+```py
+model.sequence_score(["The sketch of those trucks hasn't", "The sketch of those trucks haven't"], reduction = x.sum(1))
 
 # Log probabilities of the sentences:
-# [-45.78099822998047, -47.618995666503906]
+# tensor([-37.6981, -39.6865])
 ```
 
 Finally, `minicons` also facilitates large-scale experiments. For example, let's run our test of GPT2-small's behavior on the full number-agreement task from BLiMP:
@@ -88,8 +143,8 @@ good_scores = []
 bad_scores = []
 for batch in stimuli_dl:
     good, bad = batch
-    good_scores.extend(model.score(good), pool = torch.sum)
-    bad_scores.extend(model.score(bad), pool = torch.sum)
+    good_scores.extend(model.sequence_score(good), reduction = lambda x: x.sum(1))
+    bad_scores.extend(model.sequence_score(bad), reduction = lambda x: x.sum(1))
 
 
 # Testing the extent to which GPT2-small shows patterns of number-agreement:
