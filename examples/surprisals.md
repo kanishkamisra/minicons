@@ -36,6 +36,8 @@ base_two [bool]: Use base 2 for the log-prob
 return_tensors [bool]: Whether the output should contain tensors.
 ```
 
+Each value here represents the conditional probability -- P(word | left context), so the first value represents the probability of the second word given the first.
+
 ```py
 logprobs = model.compute_stats(model.prepare_text("The sketch of those trucks hasn't"))
 
@@ -64,7 +66,7 @@ model.compute_stats(model.prepare_text(sentences))
 #  -10.669326782226562,
 #  -0.0013275146484375]]
 ```
-To also get tokens in the output use:
+To also get tokens in the output, use the following code. Note: `minicons` adds an additional `0.0` log-probability for the first token/word as convention.
 
 ```py
 model.token_score(sentences)
