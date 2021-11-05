@@ -92,11 +92,11 @@ class CWE(object):
     
     # A function that extracts the representation of a given word in a sentence (first occurrence only)
 
-    def extract_representation(self, sentence_words: Union[List[str, Union[Tuple[int, int], str]], List[List[str, Union[Tuple[int, int], str]]]], layer: Union[int, List[int]] = None) -> Union[torch.Tensor, List[torch.Tensor]]:
+    def extract_representation(self, sentence_words: Union[List[List[Union[str, Union[Tuple(int, int), str]]]], List[Union[str, Union[Tuple(int, int), str]]]], layer: Union[int, List[int]] = None) -> Union[torch.Tensor, List[torch.Tensor]]:
         """
         Extract representations from the model at a given layer.
 
-        :param ``Union[List[sentence, Union[Tuple[int, int], str]], List[List[sentence, Union[Tuple[int, int], str]]]]`` sentence_words: Input 
+        :param ``Union[List[List[Union[str, Union[Tuple(int, int), str]]]], List[Union[str, Union[Tuple(int, int), str]]]]`` sentence_words: Input 
             consisting of `[(sentence, word)]`, where sentence is an
             input sentence, and word is a word present in the sentence
             that will be masked out, or `[(sentence, (start, end))]`,
