@@ -92,7 +92,7 @@ class CWE(object):
     
     # A function that extracts the representation of a given word in a sentence (first occurrence only)
 
-    def extract_representation(self, sentence_words: Union[List[List[Union[str, Union[Tuple(int, int), str]]]], List[Union[str, Union[Tuple(int, int), str]]]], layer: Union[int, List[int]] = None) -> Union[torch.Tensor, List[torch.Tensor]]:
+    def extract_representation(self, sentence_words: Union[List[List[Union[str, Union[Tuple[int, int], str]]]], List[Union[str, Union[Tuple[int, int], str]]]], layer: Union[int, List[int]] = None) -> Union[torch.Tensor, List[torch.Tensor]]:
         """
         Extract representations from the model at a given layer.
 
