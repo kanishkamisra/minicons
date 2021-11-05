@@ -1,6 +1,7 @@
 # remove example sandbox
 example.ipynb
 sandbox.ipynb
+tokenization.ipynb
 
 # remove vscode
 .vscode/

@@ -22,6 +22,10 @@ def get_batch(data: list, batch_size: int, shuffle: bool = False):
         batch = data[sindex:]
         yield batch
 
+def character_span(sentence, word):
+    assert word in sentence
+    idx = sentence.find(word)
+    return idx, idx + len(word)
 
 def find_pattern(pieces: List, whole: List) -> Tuple:
     num_pieces = len(pieces)

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "minicons"
-version = "0.1.12"
+version = "0.1.13"
 description = "A package of useful functions to analyze transformer based language models."
 authors = ["Kanishka Misra <kmisra@purdue.edu>"]
 license = "MIT"
@@ -13,7 +13,6 @@ keywords = ["transformers", "language models", "nlp"]
 python = ">=3.7"
 transformers = "^4.4.1"
 torch = "^1.8.0"
-matplotlib = "^3.4.1"
 polyleven = "^0.7"
 
 [tool.poetry.dev-dependencies]

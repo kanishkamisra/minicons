@@ -1,6 +1,6 @@
 from typing import Iterable, Union, List, Dict, Optional, Tuple
 
-from .utils import find_pattern, find_index, find_paired_indices
+from .utils import find_pattern, find_index, find_paired_indices, character_span
 
 from transformers import AutoModel, AutoTokenizer
 import torch
@@ -92,16 +92,17 @@ class CWE(object):
     
     # A function that extracts the representation of a given word in a sentence (first occurrence only)
 
-    def extract_representation(self, sentence_words: Union[Tuple[str], List[Tuple[str]]], layer:int = None) -> Union[torch.Tensor, List[torch.Tensor]]:
+    def extract_representation(self, sentence_words: Union[List[str, Union[Tuple[int, int], str]], List[List[str, Union[Tuple[int, int], str]]]], layer: Union[int, List[int]] = None) -> Union[torch.Tensor, List[torch.Tensor]]:
         """
         Extract representations from the model at a given layer.
 
-        :param ``Union[Tuple[str], List[Tuple[str]]]`` text: Input 
+        :param ``Union[List[sentence, Union[Tuple[int, int], str]], List[List[sentence, Union[Tuple[int, int], str]]]]`` sentence_words: Input 
             consisting of `[(sentence, word)]`, where sentence is an
             input sentence, and word is a word present in the sentence
-            that will be masked out.
-        :param layer: layer from which the hidden states are extracted.
-        :type layer: int
+            that will be masked out, or `[(sentence, (start, end))]`,
+            where (start, end) is a tuple consisting of the character
+            span indices that form the word.
+        :param ``Union[int, List[int]]`` layer: layer(s) from which the hidden states are extracted.
         :return: torch tensors or list of torch
             tensors corresponding to word representations
         """
@@ -112,15 +113,15 @@ class CWE(object):
         input_ids, hidden_states = self.encode_text(list(list(zip(*sentences))[0]), layer)
 
         if isinstance(sentences[0][1], str):
-            sentences = [(s, find_index(s, w)) for s, w in sentences]
+            sentences = [(s, character_span(s, w)) for s, w in sentences]
     
         search_queries = []
         for s, idx in sentences:
             if 0 in idx:
-                search_queries.append(self.tokenizer.encode_plus(f'{" ".join(s.split()[idx[0]:idx[1]])}', add_special_tokens = False)['input_ids'])
+                search_queries.append(self.tokenizer.encode_plus(f'{s[idx[0]:idx[1]]}', add_special_tokens = False)['input_ids'])
             else:
                 ## this one really matters if we are using GPT2
-                search_queries.append(self.tokenizer.encode_plus(f' {" ".join(s.split()[idx[0]:idx[1]])}', add_special_tokens = False)['input_ids'])
+                search_queries.append(self.tokenizer.encode_plus(f' {s[idx[0]:idx[1]]}', add_special_tokens = False)['input_ids'])
 
         query_idx = list(map(lambda x: find_pattern(x[0], x[1]), zip(search_queries, input_ids.tolist())))
 
