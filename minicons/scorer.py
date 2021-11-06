@@ -71,7 +71,7 @@ class LMScorer:
     def prime_text(self, preamble: Union[str, List[str]], stimuli: Union[str, List[str]]) -> Tuple:
         raise NotImplementedError
 
-    def token_score(self, batch: Iterable, ranks: bool = False):
+    def token_score(self, batch: Iterable, surprisal: bool = False, ranks: bool = False):
         raise NotImplementedError
     
     def score(self, batch: Union[str, List[str]], pool: Callable = torch.mean, *args) -> Union[float, List[float]]:
@@ -397,16 +397,14 @@ class MaskedLMScorer(LMScorer):
         attention_masks = attention_masks.to(self.device)
         effective_token_ids = torch.cat([torch.tensor(x) for x in effective_token_ids])
 
-        sent_tokens = list(map(lambda x: self.tokenizer.convert_ids_to_tokens(x.tolist()), effective_token_ids.split(lengths)))
-
         indices = list(chain.from_iterable([list(range(o,o+n)) for n, o in zip(lengths, offsets)]))
         with torch.no_grad():
             output = self.model(token_ids, attention_mask = attention_masks)
-            logits = output.logits[torch.arange(sum(lengths)), indices]
-            if self.device == 'cuda:0' or self.device == "cuda:1":
-                logits.detach()
+            logits = output.logits[torch.arange(sum(lengths)), indices].detach()
 
-        return logits
+        logprob_distribution = logits - logits.logsumexp(1).unsqueeze(1)
+
+        return logprob_distribution
 
     def cloze_distribution(self, queries: Iterable) -> torch.Tensor:
     
@@ -482,13 +480,109 @@ class MaskedLMScorer(LMScorer):
                 ranks = (-1.0 * sent_log_probs).argsort().argsort() + 1
                 word_ranks = ranks[torch.arange(shape[0]), effective_token_ids].split(lengths)
             sent_log_probs = sent_log_probs[torch.arange(sum(lengths)), effective_token_ids].type(torch.DoubleTensor).split(lengths)
+            print(sent_log_probs)
             # sentence_scores = list(map(lambda x: x.sum().tolist(), logprobs))
             # outputs.append((logprobs, sent_tokens))
             if rank:
                 return list(zip(sent_log_probs, sent_tokens, word_ranks))
-    
             
         return list(zip(sent_log_probs, sent_tokens))
+
+    def compute_stats(self, batch: Iterable, rank: bool = False, base_two: bool = False, return_tensors: bool = False) -> Union[Tuple[List[float], List[float]], List[float]]:
+        '''
+        TODO: docstring
+        '''
+        token_ids, attention_masks, effective_token_ids, lengths, offsets = list(zip(*batch))
+        token_ids = torch.cat(token_ids)
+        attention_masks = torch.cat(attention_masks)
+        token_ids = token_ids.to(self.device)
+        attention_masks = attention_masks.to(self.device)
+        effective_token_ids = torch.cat([torch.tensor(x) for x in effective_token_ids])
+        
+        indices = list(chain.from_iterable([list(range(o,o+n)) for n, o in zip(lengths, offsets)]))
+
+        with torch.no_grad():
+            output = self.model(token_ids, attention_mask = attention_masks)
+            logits = output.logits.detach()[torch.arange(sum(lengths)), indices]
+
+        logprob_distribution = logits - logits.logsumexp(1).unsqueeze(1)
+
+        if base_two:
+            logprob_distribution = logprob_distribution/torch.tensor(2).log()
+
+        if rank:
+            shape = logprob_distribution.shape
+            '''
+            Double argsort trick:
+            first argsort returns idxes of values that would return a sorted tensor,
+            second argsort returns ranks (0 indexed)
+
+            Proof: https://www.berkayantmen.com/rank.html
+
+            TODO: Try to implement ranking in linear time but across arbitrary dimensions:
+            https://stackoverflow.com/a/5284703
+            '''
+            word_ranks = (-1.0 * logprob_distribution).argsort().argsort() + 1
+            # inv_ranks = logprob_distribution.argsort().argsort() + 1
+            # word_ranks = shape[1] - inv_ranks + 1
+            word_ranks = word_ranks[torch.arange(shape[0]), effective_token_ids].split(lengths)
+            word_ranks = [wr.tolist() for wr in word_ranks]
+
+        logprobs = logprob_distribution[torch.arange(sum(lengths)), effective_token_ids].type(torch.DoubleTensor).split(lengths)
+        logprobs = [lp for lp in logprobs]
+
+        if not return_tensors:
+            logprobs = [lp.tolist() for lp in logprobs]
+
+        if rank:
+            return logprobs, word_ranks
+        else:
+            return logprobs
+
+    def sequence_score(self, batch, reduction = lambda x: x.mean(0).item(), base_two = False):
+        '''
+        TODO: reduction should be a string, if it's a function, specify what kind of function. --> how to ensure it is always that type?
+        '''
+        tokenized = self.prepare_text(batch)
+        scores = self.compute_stats(tokenized, rank = False, base_two = base_two, return_tensors = True)
+        reduced = list(map(reduction, scores))
+        return reduced
+
+    def token_score(self, batch: Iterable, surprisal = False, base_two = False, rank = False):
+        '''
+        returns a tuple of tokens, their corresponding log probabilities/surprisals, and their ranks (optional)
+        '''
+        tokenized = self.prepare_text(batch)
+        if rank:
+            scores, ranks = self.compute_stats(tokenized, rank = rank, base_two = base_two, return_tensors=True)
+            ranks = ranks.tolist()
+        else:
+            scores = self.compute_stats(tokenized, base_two = base_two, return_tensors=True)
+
+        if surprisal:
+            scores = [-1.0 * s for s in scores]
+
+        scores = [s.tolist() for s in scores]
+
+        indices = [[i.item() for i in indexed if i.item() != self.tokenizer.pad_token_id] for indexed in list(zip(*tokenized))[2]]
+        tokens = [self.decode(idx) for idx in indices]
+
+        if rank:
+            assert len(tokens) == len(scores) == len(ranks)
+        else:
+            assert len(tokens) == len(scores)
+
+        res = []
+        if rank:
+            for t, s, r in zip(tokens, scores, ranks):
+                res.append(list(zip(t, s, r)))
+            # return [list(zip(t, s, r)) for t, s, r in zip(tokens, scores, ranks)]
+        else:
+            for t, s in zip(tokens, scores):
+                res.append(list(zip(t, s)))
+
+        return res
+
 
 class IncrementalLMScorer(LMScorer):
     """
@@ -621,11 +715,12 @@ class IncrementalLMScorer(LMScorer):
             outputs.append(sent_logits[-1])
         return torch.stack(outputs, 0)
 
-    def next_word_distribution(self, queries: List):
+    def next_word_distribution(self, queries: List, surprisal: bool = False):
         '''
         Returns the log probability distribution of the next word.
         '''
         encoded = self.encode(queries)
+        encoded = encoded.to(self.device)
         query_ids = [[j for j, i in enumerate(instance) if i != self.tokenizer.pad_token_id][-1] for instance in encoded['input_ids'].tolist()]
 
         logits = self.model(**encoded).logits.detach()
@@ -633,19 +728,27 @@ class IncrementalLMScorer(LMScorer):
 
         logits = logits[torch.arange(len(query_ids)), query_ids]
         logprobs = logits - logits.logsumexp(1).unsqueeze(1)
+
+        if surprisal:
+            logprobs = logprobs/torch.tensor(2).log()
         
         return logprobs
 
-    def compute_stats(self, batch: Iterable, rank: bool = False, base_two: bool = False, return_tensors = False) -> Union[Tuple[List[float], List[float]], List[float]]:
-        
+    def compute_stats(self, batch: Iterable, rank: bool = False, base_two: bool = False, return_tensors: bool = False) -> Union[Tuple[List[float], List[float]], List[float]]:
+        '''
+        TODO: Docstring
+        '''
         encoded, offsets = batch
+        encoded = encoded.to(self.device)
         
         ids = [[i for i in instance if i != self.tokenizer.pad_token_id] for instance in encoded['input_ids'].tolist()]
 
         ## Ignore the probabilities of the first token.
         effective_ids = [id[1:] for id in ids]
 
-        logits = self.model(**encoded).logits.detach()
+        with torch.no_grad():
+            logits = self.model(**encoded).logits.detach()
+
         logits[:, :, self.tokenizer.pad_token_id] = float("-inf")
 
         logits = logits.split([1]*len(offsets))
@@ -691,23 +794,19 @@ class IncrementalLMScorer(LMScorer):
 
         if return_tensors:
             logprobs = [torch.tensor(l) for l in logprobs]
-            logprobs = torch.stack(logprobs)
 
         if rank:
-            if return_tensors:
-                ranks = [torch.tensor[r] for r in ranks]
-                ranks = torch.stack(ranks)
             return logprobs, ranks
         else:
             return logprobs
 
-    def sequence_score(self, batch, reduction = lambda x: x.mean(1), base_two = False):
+    def sequence_score(self, batch, reduction = lambda x: x.mean(0).item(), base_two = False):
         '''
         TODO: reduction should be a string, if it's a function, specify what kind of function. --> how to ensure it is always that type?
         '''
         tokenized = self.prepare_text(batch)
         scores = self.compute_stats(tokenized, rank = False, base_two = base_two, return_tensors = True)
-        reduced = reduction(scores)
+        reduced = list(map(reduction, scores))
         return reduced
 
     def token_score(self, batch, surprisal = False, base_two = False, rank = False):
@@ -716,17 +815,18 @@ class IncrementalLMScorer(LMScorer):
         '''
         tokenized = self.prepare_text(batch)
         if rank:
-            scores, ranks = self.compute_stats(tokenized, rank = rank, base_two = base_two, return_tensors = True)
+            scores, ranks = self.compute_stats(tokenized, rank = rank, base_two = base_two, return_tensors=True)
             ranks = ranks.tolist()
         else:
-            scores = self.compute_stats(tokenized, base_two = base_two, return_tensors = True)
+            scores = self.compute_stats(tokenized, base_two = base_two, return_tensors=True)
 
         if surprisal:
-            scores = -1.0 * scores
+            scores = [-1.0 * s for s in scores]
 
-        scores = scores.tolist()
+        scores = [s.tolist() for s in scores]
 
-        tokens = [self.decode(idx) for idx in tokenized[0]['input_ids']]
+        indices = [[i for i in indexed if i != self.tokenizer.pad_token_id] for indexed in tokenized[0]['input_ids'].tolist()]
+        tokens = [self.decode(idx) for idx in indices]
 
         if rank:
             assert len(tokens) == len(scores) == len(ranks)
@@ -741,12 +841,16 @@ class IncrementalLMScorer(LMScorer):
                     sc = [0.0]*diff + s
                     ra = [0]*diff + r
                     res.append(list(zip(t, sc, ra)))
+                else:
+                    res.append(list(zip(t, sc, ra)))
             # return [list(zip(t, s, r)) for t, s, r in zip(tokens, scores, ranks)]
         else:
             for t, s in zip(tokens, scores):
                 if len(t) > len(s):
                     diff = len(t) - len(s)
                     sc = [0.0]*diff + s
+                    res.append(list(zip(t, sc)))
+                else:
                     res.append(list(zip(t, sc)))
 
         return res
