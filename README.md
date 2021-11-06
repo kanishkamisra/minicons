@@ -40,13 +40,12 @@ tensor([[ 0.5399, -0.2461, -0.0968,  ..., -0.4670, -0.5312, -0.0549],
 '''
 ```
 
-1. Compute sentence acceptability measures (surprisals) using Incremental Language Models:
+2. Compute sentence acceptability measures (surprisals) using Word Prediction Models:
 
 ```py
 from minicons import scorer
 
-# Masked LM scoring is temporarily broken. I am working on fixing it asap (date: Oct 21, 2021)
-# mlm_model = scorer.MaskedLMScorer('bert-base-uncased', 'cpu')
+mlm_model = scorer.MaskedLMScorer('bert-base-uncased', 'cpu')
 ilm_model = scorer.IncrementalLMScorer('distilgpt2', 'cpu')
 
 stimuli = ["The keys to the cabinet are on the table.",
@@ -59,20 +58,24 @@ stimuli = ["The keys to the cabinet are on the table.",
 # Sequence Log-probability, normalized by number of tokens - lambda x: x.mean(1)
 # and so on...
 
-print(ilm_model.sequence_score(stimuli, reduction = lambda x: -x.sum(1)))
+print(ilm_model.sequence_score(stimuli, reduction = lambda x: -x.sum(0).item()))
 
 '''
-[41.51601982116699, 44.497480392456055]
+[39.879737854003906, 42.75846481323242]
+'''
+
+# MLM scoring, inspired by Salazar et al., 2020
+print(mlm_model.sequence_score(stimuli, reduction = lambda x: -x.sum(0).item()))
+'''
+[13.962685585021973, 23.415111541748047]
 '''
 ```
 
 ## Tutorials
 
 - [Introduction to using LM-scoring methods using minicons](https://kanishka.xyz/post/minicons-running-large-scale-behavioral-analyses-on-transformer-lms/)
-- [Computing Surprisals using minicons](examples/surprisals.md)
+- [Computing sentence and token surprisals using minicons](examples/surprisals.md)
+- [Extracting word/phrase representations using minicons](examples/word_representations.md)
 
-## Upcoming features:
-
-- Explore attention distributions extracted from transformers.
-- Contextual cosine similarities, i.e., compute a word's cosine similarity with every other word in the input context with batched computation.
-- Open to suggestions!
+## Recent Updates
+- **November 6, 2021:** MLM scoring has been fixed! You can now use `model.token_score()` and `model.sequence_score()` with `MaskedLMScorers` as well!
