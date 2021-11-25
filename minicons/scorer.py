@@ -26,7 +26,11 @@ class LMScorer:
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast = True)
         self.device = device
         self.vocab = defaultdict(list)
-        {self.vocab[x.strip()].append(i) for x, i in [(self.tokenizer.decode([i]), i) for i in range(self.tokenizer.vocab_size)]}
+        # {self.vocab[x.strip()].append(i) for x, i in [(self.tokenizer.decode([i]), i) for i in range(self.tokenizer.vocab_size)]}
+        for i in range(self.tokenizer.vocab_size):
+            decoded = [(self.tokenizer.decode(i), i)]
+            for x, j in decoded:
+                self.vocab[x.strip()].append(j)
 
     def add_special_tokens(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
         raise NotImplementedError
@@ -206,7 +210,7 @@ class MaskedLMScorer(LMScorer):
 
         return sentences
 
-    def mask(self, sentence_words: Union[Tuple[str], List[Tuple[str]]]) -> Tuple:
+    def mask(self, sentence_words: Union[Tuple[str, str], List[Tuple[str, str]]]) -> Tuple[str, str, int]:
         """
         Processes a list of (sentence, word) into input that has the
         word masked out of the sentence. 
@@ -228,7 +232,7 @@ class MaskedLMScorer(LMScorer):
 
         return (sentences, words, length)
 
-    def cloze(self, sentence_words: Union[str, List[str]]) -> torch.Tensor:
+    def cloze(self, sentence_words: Union[Tuple[str, str], List[Tuple[str, str]]]) -> torch.Tensor:
         """
         Runs inference on masked input. 
         Note: only works for masked LMs.

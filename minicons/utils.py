@@ -27,11 +27,13 @@ def character_span(sentence, word):
     idx = sentence.find(word)
     return idx, idx + len(word)
 
-def find_pattern(pieces: List, whole: List) -> Tuple:
+def find_pattern(pieces: List, whole: List) -> Tuple[int, int]:
     num_pieces = len(pieces)
+    result = (0, 0)
     for i in (j for j,entry in enumerate(whole) if entry == pieces[0]):
         if whole[i:i+num_pieces] == pieces:
-            return i, i+num_pieces
+            result = (i, i + num_pieces)
+    return result
 
 def edit_distance(word1: str, word2: str) -> int:
     m, n = len(word1), len(word2) 
