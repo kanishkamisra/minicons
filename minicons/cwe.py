@@ -54,6 +54,8 @@ class CWE(object):
 
         input_ids = encoded['input_ids']
         attention_mask = encoded['attention_mask'].unsqueeze(-1)
+        if 'cuda' in self.device:
+            attention_mask = attention_mask.cpu()
 
         # Compute hidden states for the sentence for the given layer.
         output = self.model(**encoded)
