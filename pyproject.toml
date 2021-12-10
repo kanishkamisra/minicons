@@ -9,6 +9,9 @@ homepage = "https://github.com/kanishkamisra/minicons"
 repository = "https://github.com/kanishkamisra/minicons"
 keywords = ["transformers", "language models", "nlp"]
 
+[tool.poetry.scripts]
+score = 'minicons.bin.cli:main'
+
 [tool.poetry.dependencies]
 python = ">=3.7,<4"
 transformers = "^4.4.1"

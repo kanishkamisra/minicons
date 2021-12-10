@@ -272,11 +272,11 @@ class MaskedLMScorer(LMScorer):
 
         Borrows preprocessing algorithm from Salazar et al. (2020), and
         modifies code from the following github repository by simonpri:
-            https://github.com/simonepri/lm-scorer
+        https://github.com/simonepri/lm-scorer
         
         :param text: batch of sentences to be prepared for scoring.
-        :return: Batch of formatted input that can be passed to
-            `logprob`
+
+        :return: Batch of formatted input that can be passed to `logprob`
         """
         # converts input text to batch of tensors with every position except the cls and sep token masked
         sentences = [text] if isinstance(text, str) else text
@@ -331,11 +331,11 @@ class MaskedLMScorer(LMScorer):
 
         Borrows preprocessing algorithm from Salazar et al. (2020), and
         modifies code from the following github repository by simonpri:
-            https://github.com/simonepri/lm-scorer
+        https://github.com/simonepri/lm-scorer
         
         :param text: batch of sentences to be prepared for scoring.
-        :return: Batch of formatted input that can be passed to
-            `logprob`
+
+        :return: Batch of formatted input that can be passed to `logprob`
         """
         preamble_text = [preamble] if isinstance(preamble, str) else preamble
         preamble_encoded = self.encode(preamble_text, False)['input_ids']
