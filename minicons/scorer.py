@@ -1,3 +1,4 @@
+from logging import log
 from typing import Iterable, Union, List, Dict, Optional, Callable, Tuple, Any
 
 import torch
@@ -492,10 +493,12 @@ class MaskedLMScorer(LMScorer):
             
         return list(zip(sent_log_probs, sent_tokens))
 
-    def compute_stats(self, batch: Iterable, rank: bool = False, base_two: bool = False, return_tensors: bool = False) -> Union[Tuple[List[float], List[float]], List[float]]:
+    def compute_stats(self, batch: Iterable, rank: bool = False, prob = False, base_two: bool = False, return_tensors: bool = False) -> Union[Tuple[List[float], List[float]], List[float]]:
         '''
         TODO: docstring
         '''
+        assert not (base_two and prob), "cannot both use base (which is for a log), and a probability measure at the same time!"
+
         token_ids, attention_masks, effective_token_ids, lengths, offsets = list(zip(*batch))
         token_ids = torch.cat(token_ids)
         attention_masks = torch.cat(attention_masks)
@@ -513,6 +516,11 @@ class MaskedLMScorer(LMScorer):
 
         if base_two:
             logprob_distribution = logprob_distribution/torch.tensor(2).log()
+
+        if prob:
+            # print(logprob_distribution)
+            logprob_distribution = logprob_distribution.exp()
+            # print(logprob_distribution)
 
         if rank:
             shape = logprob_distribution.shape
@@ -532,16 +540,17 @@ class MaskedLMScorer(LMScorer):
             word_ranks = word_ranks[torch.arange(shape[0]), effective_token_ids].split(lengths)
             word_ranks = [wr.tolist() for wr in word_ranks]
 
-        logprobs = logprob_distribution[torch.arange(sum(lengths)), effective_token_ids].type(torch.DoubleTensor).split(lengths)
-        logprobs = [lp for lp in logprobs]
+        scores = logprob_distribution[torch.arange(sum(lengths)), effective_token_ids].type(torch.DoubleTensor).split(lengths)
+        print([s.sum(0) for s in scores])
+        scores = [s for s in scores]
 
         if not return_tensors:
-            logprobs = [lp.tolist() for lp in logprobs]
+            scores = [s.tolist() for s in scores]
 
         if rank:
-            return logprobs, word_ranks
+            return scores, word_ranks
         else:
-            return logprobs
+            return scores
 
     def sequence_score(self, batch, reduction = lambda x: x.mean(0).item(), base_two = False):
         '''
@@ -552,16 +561,19 @@ class MaskedLMScorer(LMScorer):
         reduced = list(map(reduction, scores))
         return reduced
 
-    def token_score(self, batch: Iterable, surprisal = False, base_two = False, rank = False):
+    def token_score(self, batch: Iterable, surprisal = False, prob = False, base_two = False, rank = False):
         '''
         returns a tuple of tokens, their corresponding log probabilities/surprisals, and their ranks (optional)
         '''
+        assert not (surprisal and prob), "cannot both evaluate probability and surprisal at the same time!"
+        assert not (base_two and prob), "cannot both use base (which is for a log), and a probability measure at the same time!"
+
         tokenized = self.prepare_text(batch)
         if rank:
-            scores, ranks = self.compute_stats(tokenized, rank = rank, base_two = base_two, return_tensors=True)
+            scores, ranks = self.compute_stats(tokenized, rank = rank, prob = prob, base_two = base_two, return_tensors=True)
             ranks = ranks.tolist()
         else:
-            scores = self.compute_stats(tokenized, base_two = base_two, return_tensors=True)
+            scores = self.compute_stats(tokenized, prob = prob, base_two = base_two, return_tensors=True)
 
         if surprisal:
             scores = [-1.0 * s for s in scores]
@@ -734,14 +746,16 @@ class IncrementalLMScorer(LMScorer):
         logprobs = logits - logits.logsumexp(1).unsqueeze(1)
 
         if surprisal:
-            logprobs = logprobs/torch.tensor(2).log()
+            logprobs = -1.0 * logprobs
         
         return logprobs
 
-    def compute_stats(self, batch: Iterable, rank: bool = False, base_two: bool = False, return_tensors: bool = False) -> Union[Tuple[List[float], List[float]], List[float]]:
+    def compute_stats(self, batch: Iterable, rank: bool = False, prob: bool = False, base_two: bool = False, return_tensors: bool = False) -> Union[Tuple[List[float], List[float]], List[float]]:
         '''
         TODO: Docstring
         '''
+        assert not (base_two and prob), "cannot both use base (which is for a log), and a probability measure at the same time!"
+
         encoded, offsets = batch
         encoded = encoded.to(self.device)
         
@@ -758,7 +772,7 @@ class IncrementalLMScorer(LMScorer):
         logits = logits.split([1]*len(offsets))
 
         ## Set up storage variables
-        logprobs = []
+        scores = []
         if rank:
             ranks = []
 
@@ -772,9 +786,12 @@ class IncrementalLMScorer(LMScorer):
                 '''
                 Log_2(X) = log_e(X)/log_e(2) (broadcasted)
                 '''
-                logprob = (logprob_distribution[torch.arange(length - offset), query_ids] / torch.tensor(2).log()).tolist()
+                score = (logprob_distribution[torch.arange(length - offset), query_ids] / torch.tensor(2).log()).tolist()
             else:
-                logprob = logprob_distribution[torch.arange(length - offset), query_ids].tolist()
+                if prob:
+                    score = logprob_distribution[torch.arange(length - offset), query_ids].exp()
+                else:
+                    score = logprob_distribution[torch.arange(length - offset), query_ids].tolist()
 
             if rank:
                 # shape = logprob_distribution.shape
@@ -794,15 +811,15 @@ class IncrementalLMScorer(LMScorer):
                 word_ranks = word_ranks[torch.arange(length - offset), query_ids].tolist()
                 ranks.append(word_ranks)
 
-            logprobs.append(logprob)
+            scores.append(score)
 
         if return_tensors:
-            logprobs = [torch.tensor(l) for l in logprobs]
+            scores = [torch.tensor(l) for l in scores]
 
         if rank:
-            return logprobs, ranks
+            return scores, ranks
         else:
-            return logprobs
+            return scores
 
     def sequence_score(self, batch, reduction = lambda x: x.mean(0).item(), base_two = False):
         '''
@@ -813,16 +830,26 @@ class IncrementalLMScorer(LMScorer):
         reduced = list(map(reduction, scores))
         return reduced
 
-    def token_score(self, batch, surprisal = False, base_two = False, rank = False):
+    def token_score(self, batch: Union[str, List[str]], surprisal: bool = False, prob: bool = False, base_two: bool = False, rank: bool = False):
         '''
-        returns a tuple of tokens, their corresponding log probabilities/surprisals, and their ranks (optional)
+        For every input sentence, returns a list of tuples in the following format:
+            `(token, score)`,
+
+        where score represents the log-probability (by default) of the token given context. Can also return ranks along with scores.
+
+        :param batch ``Union[str, List[str]]``: a single sentence or a batch of sentences.
+        :param surprisal ``bool``: a 
         '''
+
+        assert not (surprisal and prob), "cannot both evaluate probability and surprisal at the same time!"
+        assert not (base_two and prob), "cannot both use base (which is for a log), and a probability measure at the same time!"
+
         tokenized = self.prepare_text(batch)
         if rank:
-            scores, ranks = self.compute_stats(tokenized, rank = rank, base_two = base_two, return_tensors=True)
+            scores, ranks = self.compute_stats(tokenized, rank = rank, prob = prob, base_two = base_two, return_tensors=True)
             ranks = ranks.tolist()
         else:
-            scores = self.compute_stats(tokenized, base_two = base_two, return_tensors=True)
+            scores = self.compute_stats(tokenized, prob = prob, base_two = base_two, return_tensors=True)
 
         if surprisal:
             scores = [-1.0 * s for s in scores]
