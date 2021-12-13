@@ -9,6 +9,8 @@ from collections import defaultdict
 from itertools import chain
 from re import sub
 
+import warnings
+
 class LMScorer:
     """
     Base LM scorer class intended to store models and tokenizers along
@@ -65,6 +67,10 @@ class LMScorer:
         return probs, token_ranks
 
     def logprobs(self, batch: Iterable, rank: bool = False) -> Union[float, List[float]]:
+        warnings.warn(
+            "logprobs is deprecated, use compute_stats instead",
+            DeprecationWarning
+        )
         raise NotImplementedError
 
     def compute_stats(self, batch: Iterable, rank: bool = False) -> Union[Union[float, int], List[Union[float, int]]]:
@@ -76,11 +82,28 @@ class LMScorer:
     def prime_text(self, preamble: Union[str, List[str]], stimuli: Union[str, List[str]]) -> Tuple:
         raise NotImplementedError
 
-    def token_score(self, batch: Iterable, surprisal: bool = False, ranks: bool = False):
+    def token_score(self, batch: Union[str, List[str]], surprisal: bool = False, prob: bool = False, base_two: bool = False, rank: bool = False) -> Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]:
+        '''
+        For every input sentence, returns a list of tuples in the following format:
+            `(token, score)`,
+
+        where score represents the log-probability (by default) of the token given context. Can also return ranks along with scores.
+
+        :param ``Union[str, List[str]]`` batch: a single sentence or a batch of sentences.
+        :param ``bool`` surprisal: If `True`, returns per-word surprisals instead of log-probabilities.
+        :param ``bool`` prob: If `True`, returns per-word probabilities instead of log-probabilities.
+        :param ``bool`` base_two: If `True`, uses log base 2 instead of natural-log (returns bits of values in case of surprisals)
+        :param ``bool`` rank: If `True`, also returns the rank of each word in context (based on the log-probability value)
+
+        :return: A `List` containing a `Tuple` consisting of the word, its associated score, and optionally, its rank.
+        :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
+        '''
         raise NotImplementedError
     
     def score(self, batch: Union[str, List[str]], pool: Callable = torch.mean, *args) -> Union[float, List[float]]:
         '''
+        DEPRECATED as of v 0.1.18. Check out ``sequence_score`` or ``token_score`` instead!
+
         Pooled estimates of sentence log probabilities, computed by the
         language model. Pooling is usually done using a function that
         is passed to the method.
@@ -91,43 +114,61 @@ class LMScorer:
         :param pool: Pooling function, is selected to be
             `torch.mean()` by default.
         :type pool: Callable
+
         :return: Float or list of floats specifying the log
             probabilities of the input sentence(s).
         :rtype: Union[float, List[float]]
         '''
+        warnings.warn(
+            "score is deprecated, use sequence_score or token_score instead",
+            DeprecationWarning
+        )
         result = self.logprobs(self.prepare_text(batch))
         logprob, _ = list(zip(*result))
         pooled = list(map(lambda x: pool(x, *args).tolist(), logprob))
         
         return pooled
     
-    def adapt_score(self, preamble: Union[str, List[str]], stimuli: Union[str, List[str]], pool: Callable = torch.mean, *args) -> Union[float, List[float]]:
+    def adapt_score(self, preamble: Union[str, List[str]], stimuli: Union[str, List[str]], pool: Callable = torch.mean, *args) -> None:
+        """
+        DEPRECATED as of v 0.1.18. Check out ``partial_score`` instead!
+        """
+        warnings.warn(
+            "adapt_score is deprecated, use partial_score or token_score instead",
+            DeprecationWarning
+        )
+
+    def partial_score(self, preamble: Union[str, List[str]], stimuli: Union[str, List[str]], reduction: Callable = lambda x: x.mean(0).item(), **kwargs) -> List[float]:
         '''
-        Pooled estimates of sequence log probabilities, given a
-        preamble, computed by the language model. Pooling is usually
-        done using a function that is passed to the method.
+        Pooled estimates of sequence log probabilities (or some modification of it), given a preamble. Pooling is usually done using a function that is passed to the method.
 
         :param preamble: a batch of preambles or primes passed to the
-            language model. This is what the sequence is conditioned on,
-            and the model ignores the word probabilities of this part
-            of the input in estimating the overall score.
-        :type preamble: Union[str, List[str]]
+            language model. This is what the sequence is conditioned on, and the model ignores the word probabilities of this part of the input in estimating the overall score.
+        :type preamble: ``Union[str, List[str]]``
         :param stimuli: a batch of sequences (same length as preamble)
             that form the main input consisting of the sequence whose
             score you want to calculate.
-        :type stimuli: Union[str, List[str]]
-        :param pool: Pooling function, is selected to be
-            `torch.mean()` by default.
-        :type pool: Callable
-        :return: Float or list of floats specifying the log
-            probabilities of the input sentence(s). 
-        :rtype: Union[float, List[float]]
+        :type stimuli: ``Union[str, List[str]]``
+        :param reduction: Reduction function, is selected to be
+            ``lambda x: x.mean(0).item()`` by default, which stands for the avg. log-probability per token for each sequence in the batch.
+        :type reduction: Callable
+        :param kwargs: parameters for the ``compute_stats`` call --
+
+            * `prob` (`bool`): Whether the returned value should be a probability (note that the default reduction method will have to be changed to `lambda x: x.prod(0).item()` to get a meaningful return value)
+
+            * `base_two` (`bool`): whether the returned value should be in base 2 (only works when `prob = False`)
+
+            * `surprisal` (`bool`): whether the returned value should be a surprisal (does not work when `prob = True`)
+
+
+        :return: List of floats specifying the desired score for the stimuli part of the input, e.g., P(stimuli | preamble).
+        :rtype: ``List[float]``
         '''
-        result = self.logprobs(self.prime_text(preamble, stimuli))
-        logprob, _ = list(zip(*result))
-        poold = list(map(lambda x: pool(x, *args).tolist(), logprob))
+        result = self.compute_stats(self.prime_text(preamble, stimuli), **kwargs, return_tensors = True)
+        logprob = result
+        reduced = list(map(reduction, logprob))
         
-        return poold
+        return reduced
 
     def encode(self, text: Union[str, List[str]], manual_special: bool = True, return_tensors: Optional[str] = 'pt') -> Dict:
         """
@@ -141,7 +182,9 @@ class LMScorer:
         :type manual_special: bool
         :param return_tensors: returned tensor format. Default `'pt'`
         :type manual_special: str
+
         :return: Encoded batch 
+        :rtype: ``Dict``
         """
         sentences = [text] if isinstance(text, str) else text
 
@@ -156,19 +199,28 @@ class LMScorer:
 
         return tokens
     
-    def decode(self, idx):
+    def decode(self, idx: List[int]):
         """
         Decode input ids using the model's tokenizer.
 
-        :param idx: list of ids.
-        :return: Encoded batch 
+        :param ``List[int]`` idx: List of ids.
+
+        :return: Decoded strings
+        :rtype: List[str]
         """
         return [self.tokenizer.decode([x]).strip() for x in self.tokenizer.convert_tokens_to_ids(self.tokenizer.convert_ids_to_tokens(idx))]
 
 class MaskedLMScorer(LMScorer):
     """
-    Implements LM scoring and output probability analysis for masked
-    language models such as BERT and RoBERTa.
+    Class for Masked Langauge Models such as BERT, RoBERTa, etc.
+
+    :param model_name: name of the model, should either be a path
+        to a model (.pt or .bin file) stored locally, or a
+        pretrained model stored on the Huggingface Model Hub.
+    :type model_name: str
+    :param device: device type that the model should be loaded on,
+        options: `cpu or cuda:{0, 1, ...}`
+    :type device: str, optional
     """
     def __init__(self, model_name: str, device: Optional[str] = 'cpu') -> None:
         """
@@ -195,16 +247,17 @@ class MaskedLMScorer(LMScorer):
         self.mask_token_id = self.tokenizer.mask_token_id
         self.pad_token_id = self.tokenizer.pad_token_id
     
-    def add_special_tokens(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
+    def add_special_tokens(self, text: Union[str, List[str]]) -> List[str]:
         """
         Reformats input text to add special model-dependent tokens.
 
         :param text: single string or batch of strings to be
             modified.
-        :type text: Union[str, List[str]]
+        :type text: ``Union[str, List[str]]``
+
         :return: Modified input, containing special tokens as per 
             tokenizer specification
-        :rtype: Union[float, List[float]]:
+        :rtype: ``List[str]``
         """
         sentences = [text] if isinstance(text, str) else text
         sentences = [self.tokenizer.cls_token + " " + sentence + " " + self.tokenizer.sep_token for sentence in sentences]
@@ -222,6 +275,7 @@ class MaskedLMScorer(LMScorer):
             Input consisting of `[(sentence, word)]`, where sentence
             is an input sentence, and word is a word present in the
             sentence that will be masked out.
+
         :return: Tuple `(sentence, word, length)`
         """
         sentence_words = [sentence_words] if isinstance(sentence_words[0], str) else sentence_words
@@ -323,19 +377,18 @@ class MaskedLMScorer(LMScorer):
 
     def prime_text(self, preamble: Union[str, List[str]] , stimuli: Union[str, List[str]]) -> Iterable[Any]:
         """
-        Prepares a batch of input text `(preamble, stimuli)` into a
-        format fit for running MLM scoring on.
-        This is different from `prepare_text()` as it runs a different
-        preprocessing step, to ensure the preamble is only used as a
-        condition for estimating stimuli word probabilities.
+        Prepares a batch of input text into a format fit to run LM
+        scoring on. 
 
         Borrows preprocessing algorithm from Salazar et al. (2020), and
         modifies code from the following github repository by simonpri:
         https://github.com/simonepri/lm-scorer
-        
-        :param text: batch of sentences to be prepared for scoring.
 
-        :return: Batch of formatted input that can be passed to `logprob`
+        :param ``Union[str, List[str]]`` preamble: Batch of prefixes/prime/preambles on which the LM is conditioned.
+        :param ``Union[str, List[str]]`` stimuli: Batch of continuations that are scored based on the conditioned text (provided in the ``preamble``). The positions of the elements match their counterparts in the ``preamble``.
+
+        :return: Batch of formatted input that can be passed to
+            ``compute_stats``
         """
         preamble_text = [preamble] if isinstance(preamble, str) else preamble
         preamble_encoded = self.encode(preamble_text, False)['input_ids']
@@ -418,8 +471,7 @@ class MaskedLMScorer(LMScorer):
         abstract token (bw_i) representing a blank word and returns a distribution
         over the vocabulary of the model.
 
-        :param `Iterable` queries: A batch of [(s_i, bw_i)] where s_i is a prompt
-            with an abstract token (bw_i) representing a blank word
+        :param `Iterable` queries: A batch of [(s_i, bw_i)] where s_i is a prompt with an abstract token (bw_i) representing a blank word
 
         :return: Tensor contisting of log probabilities over vocab items.
         '''
@@ -461,6 +513,10 @@ class MaskedLMScorer(LMScorer):
         :return: List of MLM score metrics and tokens.
         :rtype: Union[List[Tuple[torch.Tensor, str]], List[Tuple[torch.Tensor, str, int]]]
         """
+        warnings.warn(
+            "logprobs is deprecated, use compute_stats instead",
+            DeprecationWarning
+        )
         token_ids, attention_masks, effective_token_ids, lengths, offsets = list(zip(*batch))
         token_ids = torch.cat(token_ids)
         attention_masks = torch.cat(attention_masks)
@@ -495,7 +551,16 @@ class MaskedLMScorer(LMScorer):
 
     def compute_stats(self, batch: Iterable, rank: bool = False, prob = False, base_two: bool = False, return_tensors: bool = False) -> Union[Tuple[List[float], List[float]], List[float]]:
         '''
-        TODO: docstring
+        Primary computational method that processes a batch of prepared sentences and returns per-token scores for each sentence. By default, returns log-probabilities.
+
+        :param ``Iterable`` batch: batched input as processed by ``prepare_text`` or ``prime_text``.
+        :param ``bool`` rank: whether the model should also return ranks per word (based on the conditional log-probability of the word in context).
+        :param ``bool`` prob: whether the model should return probabilities instead of log-probabilities. Can only be `True` when `base_two` is `False`.
+        :param ``bool`` base_two: whether the base of the log should be 2 (usually preferred when reporting results in bits). Can only be `True` when `prob` is `False`.
+        :param ``bool`` return_tensors: whether the model should return scores as a list of tensors instead of a list of lists. This is important in some other convenient methods used in the package.
+
+        :return: Either a tuple of lists, each containing probabilities and ranks per token in each sentence passed in the input.
+        :rtype: ``Union[Tuple[List[float], List[float]], List[float]]``
         '''
         assert not (base_two and prob), "cannot both use base (which is for a log), and a probability measure at the same time!"
 
@@ -518,9 +583,7 @@ class MaskedLMScorer(LMScorer):
             logprob_distribution = logprob_distribution/torch.tensor(2).log()
 
         if prob:
-            # print(logprob_distribution)
             logprob_distribution = logprob_distribution.exp()
-            # print(logprob_distribution)
 
         if rank:
             shape = logprob_distribution.shape
@@ -535,8 +598,6 @@ class MaskedLMScorer(LMScorer):
             https://stackoverflow.com/a/5284703
             '''
             word_ranks = (-1.0 * logprob_distribution).argsort().argsort() + 1
-            # inv_ranks = logprob_distribution.argsort().argsort() + 1
-            # word_ranks = shape[1] - inv_ranks + 1
             word_ranks = word_ranks[torch.arange(shape[0]), effective_token_ids].split(lengths)
             word_ranks = [wr.tolist() for wr in word_ranks]
 
@@ -561,9 +622,21 @@ class MaskedLMScorer(LMScorer):
         reduced = list(map(reduction, scores))
         return reduced
 
-    def token_score(self, batch: Iterable, surprisal = False, prob = False, base_two = False, rank = False):
+    def token_score(self, batch: Union[str, List[str]], surprisal: bool = False, prob: bool = False, base_two: bool = False, rank: bool = False) -> Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]:
         '''
-        returns a tuple of tokens, their corresponding log probabilities/surprisals, and their ranks (optional)
+        For every input sentence, returns a list of tuples in the following format:
+            `(token, score)`,
+
+        where score represents the log-probability (by default) of the token given context. Can also return ranks along with scores.
+
+        :param ``Union[str, List[str]]`` batch: a single sentence or a batch of sentences.
+        :param ``bool`` surprisal: If `True`, returns per-word surprisals instead of log-probabilities.
+        :param ``bool`` prob: If `True`, returns per-word probabilities instead of log-probabilities.
+        :param ``bool`` base_two: If `True`, uses log base 2 instead of natural-log (returns bits of values in case of surprisals)
+        :param ``bool`` rank: If `True`, also returns the rank of each word in context (based on the log-probability value)
+
+        :return: A `List` containing a `Tuple` consisting of the word, its associated score, and optionally, its rank.
+        :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
         '''
         assert not (surprisal and prob), "cannot both evaluate probability and surprisal at the same time!"
         assert not (base_two and prob), "cannot both use base (which is for a log), and a probability measure at the same time!"
@@ -599,11 +672,17 @@ class MaskedLMScorer(LMScorer):
 
         return res
 
-
 class IncrementalLMScorer(LMScorer):
     """
-    Implements LM scoring and output probability analysis for incremental
-    LMs such as GPT and GPT2.
+    Class for Autoregressive or Incremental (or left-to-right) language models such as GPT2, etc.
+
+    :param model_name: name of the model, should either be a path
+        to a model (.pt or .bin file) stored locally, or a
+        pretrained model stored on the Huggingface Model Hub.
+    :type model_name: str
+    :param device: device type that the model should be loaded on,
+        options: `cpu or cuda:{0, 1, ...}`
+    :type device: str, optional
     """
     def __init__(self, model_name: str, device: Optional[str] = 'cpu') -> None:
         """
@@ -625,10 +704,6 @@ class IncrementalLMScorer(LMScorer):
             self.tokenizer.add_special_tokens({"additional_special_tokens": ["<|pad|>"]})
             self.tokenizer.pad_token = "<|pad|>"
 
-        # if self.tokenizer.eos_token is None:
-        #     self.tokenizer.add_special_tokens({"additional_special_tokens": ["<|eos|>"]})
-        #     self.tokenizer.eos_token = "<|eos|>"
-
         if self.tokenizer.bos_token is None:
             self.tokenizer.add_special_tokens({"additional_special_tokens": ["<|bos|>"]})
             self.tokenizer.bos_token = "<|bos|>"
@@ -644,6 +719,7 @@ class IncrementalLMScorer(LMScorer):
         :param text: single string or batch of strings to be
             modified.
         :type text: Union[str, List[str]]
+        
         :return: Modified input, containing special tokens as per 
             tokenizer specification
         :rtype: Union[float, List[float]]:
@@ -663,8 +739,9 @@ class IncrementalLMScorer(LMScorer):
         scoring on. 
 
         :param text: batch of sentences to be prepared for scoring.
+        
         :return: Batch of formatted input that can be passed to
-            `compute_stats`
+            ``compute_stats``
         """
         encoded = self.encode(text)
         offsets = [0] * len(encoded['input_ids'])
@@ -675,9 +752,11 @@ class IncrementalLMScorer(LMScorer):
         Prepares a batch of input text into a format fit to run LM
         scoring on. 
 
-        :param text: batch of sentences to be prepared for scoring.
+        :param ``Union[str, List[str]]`` preamble: Batch of prefixes/prime/preambles on which the LM is conditioned.
+        :param ``Union[str, List[str]]`` stimuli: Batch of continuations that are scored based on the conditioned text (provided in the ``preamble``). The positions of the elements match their counterparts in the ``preamble``.
+
         :return: Batch of formatted input that can be passed to
-            `compute_stats`
+            ``compute_stats``
         """
         preamble_text = [preamble] if isinstance(preamble, str) else preamble
         preamble_encoded = self.tokenizer(preamble_text)['input_ids']
@@ -752,7 +831,16 @@ class IncrementalLMScorer(LMScorer):
 
     def compute_stats(self, batch: Iterable, rank: bool = False, prob: bool = False, base_two: bool = False, return_tensors: bool = False) -> Union[Tuple[List[float], List[float]], List[float]]:
         '''
-        TODO: Docstring
+        Primary computational method that processes a batch of prepared sentences and returns per-token scores for each sentence. By default, returns log-probabilities.
+
+        :param ``Iterable`` batch: batched input as processed by ``prepare_text`` or ``prime_text``.
+        :param ``bool`` rank: whether the model should also return ranks per word (based on the conditional log-probability of the word in context).
+        :param ``bool`` prob: whether the model should return probabilities instead of log-probabilities. Can only be `True` when `base_two` is `False`.
+        :param ``bool`` base_two: whether the base of the log should be 2 (usually preferred when reporting results in bits). Can only be `True` when `prob` is `False`.
+        :param ``bool`` return_tensors: whether the model should return scores as a list of tensors instead of a list of lists. This is important in some other convenient methods used in the package.
+
+        :return: Either a tuple of lists, each containing probabilities and ranks per token in each sentence passed in the input.
+        :rtype: ``Union[Tuple[List[float], List[int]], List[float]]``
         '''
         assert not (base_two and prob), "cannot both use base (which is for a log), and a probability measure at the same time!"
 
@@ -789,7 +877,7 @@ class IncrementalLMScorer(LMScorer):
                 score = (logprob_distribution[torch.arange(length - offset), query_ids] / torch.tensor(2).log()).tolist()
             else:
                 if prob:
-                    score = logprob_distribution[torch.arange(length - offset), query_ids].exp()
+                    score = logprob_distribution[torch.arange(length - offset), query_ids].exp().tolist()
                 else:
                     score = logprob_distribution[torch.arange(length - offset), query_ids].tolist()
 
@@ -830,15 +918,21 @@ class IncrementalLMScorer(LMScorer):
         reduced = list(map(reduction, scores))
         return reduced
 
-    def token_score(self, batch: Union[str, List[str]], surprisal: bool = False, prob: bool = False, base_two: bool = False, rank: bool = False):
+    def token_score(self, batch: Union[str, List[str]], surprisal: bool = False, prob: bool = False, base_two: bool = False, rank: bool = False) -> Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]:
         '''
         For every input sentence, returns a list of tuples in the following format:
             `(token, score)`,
 
         where score represents the log-probability (by default) of the token given context. Can also return ranks along with scores.
 
-        :param batch ``Union[str, List[str]]``: a single sentence or a batch of sentences.
-        :param surprisal ``bool``: a 
+        :param ``Union[str, List[str]]`` batch: a single sentence or a batch of sentences.
+        :param ``bool`` surprisal: If `True`, returns per-word surprisals instead of log-probabilities.
+        :param ``bool`` prob: If `True`, returns per-word probabilities instead of log-probabilities.
+        :param ``bool`` base_two: If `True`, uses log base 2 instead of natural-log (returns bits of values in case of surprisals)
+        :param ``bool`` rank: If `True`, also returns the rank of each word in context (based on the log-probability value)
+
+        :return: A `List` containing a `Tuple` consisting of the word, its associated score, and optionally, its rank.
+        :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
         '''
 
         assert not (surprisal and prob), "cannot both evaluate probability and surprisal at the same time!"
@@ -899,6 +993,10 @@ class IncrementalLMScorer(LMScorer):
             and tokens.
         :rtype: Union[List[Tuple[torch.Tensor, str]], List[Tuple[torch.Tensor, str, int]]]
         """
+        warnings.warn(
+            "logprobs is deprecated, use compute_stats instead",
+            DeprecationWarning
+        )
         batch, offsets = batch
         ids = batch["input_ids"]
         ids = ids.to(self.device)
