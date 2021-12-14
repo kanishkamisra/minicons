@@ -541,7 +541,7 @@ class MaskedLMScorer(LMScorer):
                 ranks = (-1.0 * sent_log_probs).argsort().argsort() + 1
                 word_ranks = ranks[torch.arange(shape[0]), effective_token_ids].split(lengths)
             sent_log_probs = sent_log_probs[torch.arange(sum(lengths)), effective_token_ids].type(torch.DoubleTensor).split(lengths)
-            print(sent_log_probs)
+            # print(sent_log_probs)
             # sentence_scores = list(map(lambda x: x.sum().tolist(), logprobs))
             # outputs.append((logprobs, sent_tokens))
             if rank:
@@ -602,7 +602,6 @@ class MaskedLMScorer(LMScorer):
             word_ranks = [wr.tolist() for wr in word_ranks]
 
         scores = logprob_distribution[torch.arange(sum(lengths)), effective_token_ids].type(torch.DoubleTensor).split(lengths)
-        print([s.sum(0) for s in scores])
         scores = [s for s in scores]
 
         if not return_tensors:
@@ -644,7 +643,6 @@ class MaskedLMScorer(LMScorer):
         tokenized = self.prepare_text(batch)
         if rank:
             scores, ranks = self.compute_stats(tokenized, rank = rank, prob = prob, base_two = base_two, return_tensors=True)
-            ranks = ranks.tolist()
         else:
             scores = self.compute_stats(tokenized, prob = prob, base_two = base_two, return_tensors=True)
 
@@ -941,7 +939,6 @@ class IncrementalLMScorer(LMScorer):
         tokenized = self.prepare_text(batch)
         if rank:
             scores, ranks = self.compute_stats(tokenized, rank = rank, prob = prob, base_two = base_two, return_tensors=True)
-            ranks = ranks.tolist()
         else:
             scores = self.compute_stats(tokenized, prob = prob, base_two = base_two, return_tensors=True)
 

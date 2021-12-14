@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--num_workers",
+        "--num-workers",
         "-nw",
         type=int,
         default=2,
@@ -86,7 +86,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--base_two",
+        "--base-two",
         "--in_bits",
         action="store_true"
     )
