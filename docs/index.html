@@ -221,8 +221,8 @@
 <h2>minicons: flexible behavioral analyses of transformer LMs<a class="headerlink" href="#minicons-flexible-behavioral-analyses-of-transformer-lms" title="Permalink to this headline">¶</a></h2>
 <p><code class="docutils literal notranslate"><span class="pre">minicons</span></code> has two core functionalities:</p>
 <ul class="simple">
-<li><p>Computing word and sentence level probability measures (e.g. per-word log-probability in context).</p></li>
-<li><p>Extracting word and phrase level representations from transformer LMs across different layers.</p></li>
+<li><p>Computing word and sentence level probability measures (e.g. per-word log-probability in context) using the <a class="reference external" href="minicons.scorer.html">scorer</a> module.</p></li>
+<li><p>Extracting contextual word and phrase level representations from transformer LMs across different layers using the <a class="reference external" href="minicons.cwe.html">cwe</a> module, where <code class="docutils literal notranslate"><span class="pre">cwe</span></code> stands for <cite>contextual word embedding</cite>.</p></li>
 </ul>
 <p>In general, <code class="docutils literal notranslate"><span class="pre">minicons</span></code> can be an extremely handy tool to conduct large-scale behavioral analyses of models – it can handle any LM that is available in the <a class="reference external" href="https://huggingface.co/models">huggingface model hub</a> and perform efficient batched computations. Minicons runs both on CPUs and GPUs!</p>
 </section>

@@ -17,8 +17,8 @@ minicons: flexible behavioral analyses of transformer LMs
 
 ``minicons`` has two core functionalities:
 
-* Computing word and sentence level probability measures (e.g. per-word log-probability in context).
-* Extracting word and phrase level representations from transformer LMs across different layers.
+* Computing word and sentence level probability measures (e.g. per-word log-probability in context) using the `scorer <minicons.scorer.html>`_ module.
+* Extracting contextual word and phrase level representations from transformer LMs across different layers using the `cwe <minicons.cwe.html>`_ module, where ``cwe`` stands for `contextual word embedding`.
 
 In general, ``minicons`` can be an extremely handy tool to conduct large-scale behavioral analyses of models -- it can handle any LM that is available in the `huggingface model hub <https://huggingface.co/models>`_ and perform efficient batched computations. Minicons runs both on CPUs and GPUs!
 
