@@ -3,8 +3,8 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to minicons!
-====================================
+minicons: flexible behavioral analyses of transformer LMs
+=========================================================
 
 .. toctree::
    :maxdepth: 4
@@ -12,7 +12,7 @@ Welcome to minicons!
 
    minicons
 
-minicons: flexible behavioral analyses of transformer LMs
+Introduction
 ---------------------------------------------------------
 
 ``minicons`` has two core functionalities:
@@ -22,7 +22,7 @@ minicons: flexible behavioral analyses of transformer LMs
 
 In general, ``minicons`` can be an extremely handy tool to conduct large-scale behavioral analyses of models -- it can handle any LM that is available in the `huggingface model hub <https://huggingface.co/models>`_ and perform efficient batched computations. Minicons runs both on CPUs and GPUs!
 
-``minicons`` also ships with two command line binaries to explore or conveniently score (evaluate per-token or sentence probabilities, surprisals, etc.) A detailed description will be added soon!
+``minicons`` also ships with two command-line binaries to explore single sentences or score large files of sentences! A detailed description will be added soon!
 
 Getting Started
 ---------------
