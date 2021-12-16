@@ -62,3 +62,4 @@ html_theme_options = {
     "dark_logo": "logo.png",
 }
 html_title = 'minicons'
+html_favicon = 'logo.png'
