@@ -6,7 +6,7 @@
 <link rel="index" title="Index" href="genindex.html" /><link rel="search" title="Search" href="search.html" /><link rel="next" title="minicons" href="modules.html" />
 
     <meta name="generator" content="sphinx-4.3.1, furo 2021.11.23"/>
-        <title>minicons 0.1.19 documentation</title>
+        <title>minicons</title>
       <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?digest=7f0192ddeb2adecfbaa87ffbcf67d16358b30bc1" />
     <link rel="stylesheet" type="text/css" href="_static/styles/furo-extensions.css?digest=0af69da206d614734f649b27d4cdc2dd6c31f41d" />
@@ -123,7 +123,7 @@
       </label>
     </div>
     <div class="header-center">
-      <a href="#"><div class="brand">minicons 0.1.19 documentation</div></a>
+      <a href="#"><div class="brand">minicons</div></a>
     </div>
     <div class="header-right">
       <div class="theme-toggle-container theme-toggle-header">
@@ -134,7 +134,7 @@
           <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
         </button>
       </div>
-      <label class="toc-overlay-icon toc-header-icon no-toc" for="__toc">
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
         <div class="visually-hidden">Toggle table of contents sidebar</div>
         <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
       </label>
@@ -150,7 +150,7 @@
     <img class="sidebar-logo only-dark" src="_static/logo.png" alt="Dark Logo"/>
   </div>
   
-  <span class="sidebar-brand-text">minicons 0.1.19 documentation</span>
+  <span class="sidebar-brand-text">minicons</span>
   
 </a><form class="sidebar-search-container" method="get" action="search.html" role="search">
   <input class="sidebar-search" placeholder=Search name="q" aria-label="Search">
@@ -190,24 +190,63 @@
               <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
             </button>
           </div>
-          <label class="toc-overlay-icon toc-content-icon no-toc" for="__toc">
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
             <div class="visually-hidden">Toggle table of contents sidebar</div>
             <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
           </label>
         </div>
         <article role="main">
-          <section id="welcome-to-minicons-documentation">
-<h1>Welcome to minicons’ documentation!<a class="headerlink" href="#welcome-to-minicons-documentation" title="Permalink to this headline">¶</a></h1>
+          <section id="welcome-to-minicons">
+<h1>Welcome to minicons!<a class="headerlink" href="#welcome-to-minicons" title="Permalink to this headline">¶</a></h1>
 <div class="toctree-wrapper compound">
 <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="modules.html">minicons</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="minicons.html">minicons package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="minicons.html">minicons package</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="minicons.html#submodules">Submodules</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="minicons.cwe.html">minicons.cwe module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="minicons.scorer.html">minicons.scorer module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="minicons.supervised.html">minicons.supervised module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="minicons.utils.html">minicons.utils module</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="minicons.html#module-minicons">Module contents</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
 </div>
+<section id="minicons-flexible-behavioral-analyses-of-transformer-lms">
+<h2>minicons: flexible behavioral analyses of transformer LMs<a class="headerlink" href="#minicons-flexible-behavioral-analyses-of-transformer-lms" title="Permalink to this headline">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">minicons</span></code> has two core functionalities:</p>
+<ul class="simple">
+<li><p>Computing word and sentence level probability measures (e.g. per-word log-probability in context).</p></li>
+<li><p>Extracting word and phrase level representations from transformer LMs across different layers.</p></li>
+</ul>
+<p>In general, <code class="docutils literal notranslate"><span class="pre">minicons</span></code> can be an extremely handy tool to conduct large-scale behavioral analyses of models – it can handle any LM that is available in the <a class="reference external" href="https://huggingface.co/models">huggingface model hub</a> and perform efficient batched computations. Minicons runs both on CPUs and GPUs!</p>
+</section>
+<section id="getting-started">
+<h2>Getting Started<a class="headerlink" href="#getting-started" title="Permalink to this headline">¶</a></h2>
+<p>Install <code class="docutils literal notranslate"><span class="pre">minicons</span></code> using <code class="docutils literal notranslate"><span class="pre">pip</span></code>:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip install minicons
+</pre></div>
+</div>
+<p>Alternatively, if you would like to edit the package, make sure you have <code class="docutils literal notranslate"><span class="pre">poetry</span></code> installed. You can grab it from <a class="reference external" href="https://python-poetry.org/">here</a>! Then:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="linenos">1</span>git clone git@github.com:kanishkamisra/minicons.git
+<span class="linenos">2</span>poetry shell <span class="c1"># starts a new virtual environment for the package source.</span>
+<span class="linenos">3</span>poetry install
+</pre></div>
+</div>
+</section>
+<section id="examples">
+<h2>Examples<a class="headerlink" href="#examples" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic simple">
+<li><p><a class="reference external" href="surprisals.html">Calculating surprisals from Language Models</a></p></li>
+<li><p><a class="reference external" href="representations.html">Extract word and phrase representations from Transformers</a></p></li>
+</ol>
 <p>Minicons logo made by <a class="reference external" href="https://www.flaticon.com/authors/flat-icons">Flat Icons</a> from <a class="reference external" href="https://www.flaticon.com/">flaticon</a>.</p>
+</section>
 </section>
 
         </article>
@@ -239,8 +278,29 @@
         
       </footer>
     </div>
-    <aside class="toc-drawer no-toc">
+    <aside class="toc-drawer">
       
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            Contents
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Welcome to minicons!</a><ul>
+<li><a class="reference internal" href="#minicons-flexible-behavioral-analyses-of-transformer-lms">minicons: flexible behavioral analyses of transformer LMs</a></li>
+<li><a class="reference internal" href="#getting-started">Getting Started</a></li>
+<li><a class="reference internal" href="#examples">Examples</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
       
       
     </aside>

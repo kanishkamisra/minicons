@@ -3,13 +3,46 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to minicons' documentation!
+Welcome to minicons!
 ====================================
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 4
    :caption: Contents:
 
    modules
+
+minicons: flexible behavioral analyses of transformer LMs
+---------------------------------------------------------
+
+``minicons`` has two core functionalities:
+
+* Computing word and sentence level probability measures (e.g. per-word log-probability in context).
+* Extracting word and phrase level representations from transformer LMs across different layers.
+
+In general, ``minicons`` can be an extremely handy tool to conduct large-scale behavioral analyses of models -- it can handle any LM that is available in the `huggingface model hub <https://huggingface.co/models>`_ and perform efficient batched computations. Minicons runs both on CPUs and GPUs!
+
+Getting Started
+---------------
+Install ``minicons`` using ``pip``:
+
+.. code-block:: bash
+
+   pip install minicons
+
+Alternatively, if you would like to edit the package, make sure you have ``poetry`` installed. You can grab it from `here <https://python-poetry.org/>`_! Then:
+
+.. code-block:: bash
+   :linenos:
+
+   git clone git@github.com:kanishkamisra/minicons.git
+   poetry shell # starts a new virtual environment for the package source.
+   poetry install
+
+Examples
+--------
+1. `Calculating surprisals from Language Models <surprisals.html>`_
+2. `Extract word and phrase representations from Transformers <representations.html>`_
+
 
 Minicons logo made by `Flat Icons <https://www.flaticon.com/authors/flat-icons>`_ from `flaticon <https://www.flaticon.com/>`_.

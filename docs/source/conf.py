@@ -31,7 +31,9 @@ release = '0.1.19'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'sphinx.ext.autodoc'
+    'sphinx.ext.autodoc',
+    'myst_parser',
+    'sphinx.ext.autosectionlabel'
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -59,3 +61,4 @@ html_theme_options = {
     "light_logo": "logo.png",
     "dark_logo": "logo.png",
 }
+html_title = 'minicons'
