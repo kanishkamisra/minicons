@@ -10,7 +10,7 @@ Welcome to minicons!
    :maxdepth: 4
    :caption: Contents:
 
-   modules
+   minicons
 
 minicons: flexible behavioral analyses of transformer LMs
 ---------------------------------------------------------
@@ -21,6 +21,8 @@ minicons: flexible behavioral analyses of transformer LMs
 * Extracting contextual word and phrase level representations from transformer LMs across different layers using the `cwe <minicons.cwe.html>`_ module, where ``cwe`` stands for `contextual word embedding`.
 
 In general, ``minicons`` can be an extremely handy tool to conduct large-scale behavioral analyses of models -- it can handle any LM that is available in the `huggingface model hub <https://huggingface.co/models>`_ and perform efficient batched computations. Minicons runs both on CPUs and GPUs!
+
+``minicons`` also ships with two command line binaries to explore or conveniently score (evaluate per-token or sentence probabilities, surprisals, etc.) A detailed description will be added soon!
 
 Getting Started
 ---------------

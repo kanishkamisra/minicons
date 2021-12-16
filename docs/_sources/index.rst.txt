@@ -10,7 +10,7 @@ Welcome to minicons!
    :maxdepth: 4
    :caption: Contents:
 
-   modules
+   minicons
 
 minicons: flexible behavioral analyses of transformer LMs
 ---------------------------------------------------------
