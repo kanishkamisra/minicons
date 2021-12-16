@@ -1,16 +1,16 @@
 [tool.poetry]
 name = "minicons"
-version = "0.1.18"
+version = "0.1.19"
 description = "A package of useful functions to analyze transformer based language models."
 authors = ["Kanishka Misra <kmisra@purdue.edu>"]
 license = "MIT"
 readme = "README.md"
 homepage = "https://github.com/kanishkamisra/minicons"
 repository = "https://github.com/kanishkamisra/minicons"
-keywords = ["transformers", "language models", "nlp"]
+keywords = ["transformers", "language models", "nlp", "interpretability"]
 
 [tool.poetry.scripts]
-score = 'minicons.bin.score_cli:process'
+minicons = 'minicons.bin.score_cli:process'
 
 [tool.poetry.dependencies]
 python = ">=3.7.1,<4"

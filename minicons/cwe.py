@@ -2,7 +2,7 @@ from typing import Iterable, Union, List, Dict, Optional, Tuple
 
 from .utils import find_pattern, find_index, find_paired_indices, character_span
 
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoModel, AutoTokenizer, AutoConfig
 import torch
 
 class CWE(object):
@@ -10,8 +10,19 @@ class CWE(object):
     Implements the contextualized word embedding class to
     facilitate extraction of word representations form a given
     transformer model.
+
+    :param model_name: name of the model, should either be a path
+        to a model (.pt or .bin file) stored locally, or a
+        pretrained model stored on the Huggingface Model Hub.
+    :type model_name: str
+    :param device: device type that the model should be loaded on,
+        options: `cpu or cuda:{0, 1, ...}`
+    :type device: str, optional
+    :param pretrained: whether to load the model with pretrained weights.
+        loads a randomly initialized model if `False`. Default = `True`.
+    :type pretrained: bool
     """
-    def __init__(self, model_name: str, device: Optional[str] = 'cpu') -> None:
+    def __init__(self, model_name: str, device: Optional[str] = 'cpu', pretrained: bool = True) -> None:
         """
         :param model_name: name of the model, should either be a path
             to a model (.pt or .bin file) stored locally, or a
@@ -20,10 +31,18 @@ class CWE(object):
         :param device: device type that the model should be loaded on,
             options: `cpu or cuda:{0, 1, ...}`
         :type device: str, optional
+        :param pretrained: whether to load the model with pretrained weights.
+            loads a randomly initialized model if `False`. Default = `True`.
+        :type pretrained: bool
         """
         self.device = device
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast = True)
-        self.model = AutoModel.from_pretrained(model_name, return_dict = True, output_hidden_states = True)
+        self.pretrained = pretrained
+        if pretrained:
+            self.model = AutoModel.from_pretrained(model_name, return_dict = True, output_hidden_states = True)
+        else:
+            self.config = AutoConfig.from_pretrained(model_name, return_dict = True, output_hidden_states = True)
+            self.model = AutoModel.from_config(self.config)
         self.dimensions = list(self.model.parameters())[-1].shape[0]
 
         self.layers = self.model.config.num_hidden_layers
