@@ -3,6 +3,8 @@ example.ipynb
 sandbox.ipynb
 tokenization.ipynb
 cwe.ipynb
+*.ipynb
+samples.txt
 
 # remove logo from main doc
 logo_file.png

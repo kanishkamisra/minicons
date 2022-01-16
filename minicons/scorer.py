@@ -3,6 +3,7 @@ from typing import Iterable, Union, List, Dict, Optional, Callable, Tuple, Any
 
 import torch
 from transformers import AutoModelForCausalLM, AutoModelForMaskedLM, AutoTokenizer
+from transformers.utils.logging import set_verbosity_error
 
 from collections import defaultdict
 
@@ -10,6 +11,8 @@ from itertools import chain
 from re import sub
 
 import warnings
+
+set_verbosity_error()
 
 class LMScorer:
     """

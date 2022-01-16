@@ -1,5 +1,5 @@
 from typing import *
-
+from collections import defaultdict
 import argparse
 import os
 import pandas as pd
@@ -119,30 +119,93 @@ def validate_args(args: argparse.Namespace) -> None:
             raise ValueError("Invalid device.")
 
 def pretty_print(results: Iterable) -> None:
-    print(results.to_string(index=False))
+    print(results.round(2).to_string(index=False))
+
+def cli_token_score(self, batch, model_type, surprisal = False, prob = False, base_two = False, rank = False, batch_idx = 0, global_batch_size = 1):
+    
+    result = defaultdict(list)
+
+    tokenized = self.prepare_text(batch)
+    if rank:
+        scores, ranks = self.compute_stats(tokenized, rank = rank, base_two = base_two, return_tensors=True)
+    else:
+        scores = self.compute_stats(tokenized, base_two = base_two, return_tensors=True)
+
+    scores = [s.tolist() for s in scores]
+
+    if model_type == 'incremental':
+        indices = [[i for i in indexed if i != self.tokenizer.pad_token_id] for indexed in tokenized[0]['input_ids'].tolist()]
+    else:
+        indices = [[i.item() for i in indexed if i.item() != self.tokenizer.pad_token_id] for indexed in list(zip(*tokenized))[2]]
+
+    tokens = [self.decode(idx) for idx in indices]
+
+    if rank:
+        for i, (t, s, r) in enumerate(zip(tokens, scores, ranks)):
+            sent_id = i + batch_idx * global_batch_size + 1
+            diff = 0
+            if len(t) > len(s):
+                diff = len(t) - len(s)
+                s = [None]*diff + s
+                r = [None]*diff + r
+            result['sentence_id'].extend([sent_id]*len(t))
+            result['token_id'].extend([j+1 for j, _ in enumerate(t)])
+            result['token'].extend(t)
+            result['logprob'].extend(s)
+            
+            if prob:
+                probs = [None] * diff + torch.tensor(s[diff:]).exp().tolist()
+                result['prob'].extend(probs)
+            
+            if surprisal:
+                surps = [-1.0 * x if x is not None else x for x in s]
+                result['surprisal'].extend(surps)
+
+            result['rank'].extend(r)
+    else:
+        for i, (t, s) in enumerate(zip(tokens, scores)):
+            sent_id = i + batch_idx * global_batch_size + 1
+            diff = 0
+            if len(t) > len(s):
+                diff = len(t) - len(s)
+                s = [None]*diff + s
+            result['sentence_id'].extend([sent_id]*len(t))
+            result['token_id'].extend([j+1 for j, _ in enumerate(t)])
+            result['token'].extend(t)
+            result['logprob'].extend(s)
+            
+            if prob:
+                probs = [None] * diff + torch.tensor(s[diff:]).exp().tolist()
+                result['prob'].extend(probs)
+            
+            if surprisal:
+                surps = [-1.0 * x if x is not None else x for x in s]
+                result['surprisal'].extend(surps)
+    return result
 
 def main(args: argparse.Namespace):
-    if (args.scorer.lower() == 'incremental'):
+    modeltype = args.scorer.lower()
+    if (modeltype == 'incremental'):
         lm = IncrementalLMScorer(args.model, args.device)
-    elif (args.scorer.lower() == 'masked'):
+    elif (modeltype == 'masked'):
         lm = MaskedLMScorer(args.model, args.device)
     else:
         raise Exception("Incorrect scorer passed. Use either incremental or masked.")
     
     if (args.text):
-        results = lm.token_score(args.text, args.surprisal, args.prob, args.base_two, args.rank)
+        processed_results = cli_token_score(lm, args.text, modeltype, args.surprisal, args.prob, args.base_two, args.rank)
     else:
         sentence_file = open(args.file, 'r')
         sentences = [sentence.strip() for sentence in sentence_file]
         sentence_dl = DataLoader(sentences, batch_size=args.batch_size, num_workers=args.num_workers)
         results = []
-        for batch in tqdm(sentence_dl):
-            results.extend(lm.token_score(batch, args.surprisal, args.prob, args.base_two, args.rank))
-    
-    processed_results = []
-    for sentence_ind, sentence in enumerate(results):
-        for score_ind, score in enumerate(sentence):
-            processed_results.append([sentence_ind + 1, score_ind + 1] + list(score))
+        for i, batch in enumerate(tqdm(sentence_dl)):
+            results.append(cli_token_score(lm, batch, modeltype, args.surprisal, args.prob, args.base_two, args.rank, batch_idx = i, global_batch_size=args.batch_size))
+        
+        processed_results = defaultdict(list)
+        for result in results:
+            for k, v in result.items():
+                processed_results[k].extend(v)
 
     processed_results = pd.DataFrame(processed_results)
     pretty_print(processed_results)

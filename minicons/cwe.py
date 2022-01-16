@@ -3,7 +3,10 @@ from typing import Iterable, Union, List, Dict, Optional, Tuple
 from .utils import find_pattern, find_index, find_paired_indices, character_span
 
 from transformers import AutoModel, AutoTokenizer, AutoConfig
+from transformers.utils.logging import set_verbosity_error
 import torch
+
+set_verbosity_error()
 
 class CWE(object):
     """
