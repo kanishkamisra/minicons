@@ -79,43 +79,49 @@ class CWE(object):
         if 'cuda' in self.device:
             attention_mask = attention_mask.cpu()
 
-        # Compute hidden states for the sentence for the given layer.
-        output = self.model(**encoded)
-
-        # Hidden states appear as the last element of the otherwise custom hidden_states object
-        if isinstance(layer, list) or layer == 'all':
-            hidden_states = output.hidden_states
-            if "cuda" in self.device:
-                input_ids = input_ids.cpu()
-                hidden_states = [h.detach().cpu() for h in hidden_states]
-            else:
-                hidden_states = [h.detach() for h in hidden_states]
-            if layer != 'all':
-                hidden_states = [hidden_states[i] for i in sorted(layer)]
-
-            hidden_states = [h * attention_mask for h in hidden_states]
-        else:
-            # if layer != 'all':
-            if layer is None:
-                layer = self.layers
-            elif layer > self.layers:
-                raise ValueError(f"Number of layers specified ({layer}) exceed layers in model ({self.layers})!")
-            hidden_states = output.hidden_states[layer]
-            if "cuda" in self.device:
-                input_ids = input_ids.cpu()
-                hidden_states = hidden_states.detach().cpu()
-            else:
-                hidden_states = hidden_states.detach()
-
+        if layer == 'static' or layer == 'pre':
+            print("hmm")
+            hidden_states = [self.model.embeddings.word_embeddings.weight[i] for i in input_ids]
+            hidden_states = torch.stack(hidden_states)
             hidden_states = hidden_states * attention_mask
-            # else:
-            #     hidden_states = output.hidden_states
-            
-            #     if "cuda" in self.device:
-            #         input_ids = input_ids.cpu()
-            #         hidden_states = [h.detach().cpu() for h in hidden_states]
-            #     else:
-            #         hidden_states = [h.detach() for h in hidden_states]
+        else:
+        # Compute hidden states for the sentence for the given layer.
+            output = self.model(**encoded)
+
+            # Hidden states appear as the last element of the otherwise custom hidden_states object
+            if isinstance(layer, list) or layer == 'all':
+                hidden_states = output.hidden_states
+                if "cuda" in self.device:
+                    input_ids = input_ids.cpu()
+                    hidden_states = [h.detach().cpu() for h in hidden_states]
+                else:
+                    hidden_states = [h.detach() for h in hidden_states]
+                if layer != 'all':
+                    hidden_states = [hidden_states[i] for i in sorted(layer)]
+
+                hidden_states = [h * attention_mask for h in hidden_states]
+            else:
+                # if layer != 'all':
+                if layer is None:
+                    layer = self.layers
+                elif layer > self.layers:
+                    raise ValueError(f"Number of layers specified ({layer}) exceed layers in model ({self.layers})!")
+                hidden_states = output.hidden_states[layer]
+                if "cuda" in self.device:
+                    input_ids = input_ids.cpu()
+                    hidden_states = hidden_states.detach().cpu()
+                else:
+                    hidden_states = hidden_states.detach()
+
+                hidden_states = hidden_states * attention_mask
+                # else:
+                #     hidden_states = output.hidden_states
+                
+                #     if "cuda" in self.device:
+                #         input_ids = input_ids.cpu()
+                #         hidden_states = [h.detach().cpu() for h in hidden_states]
+                #     else:
+                #         hidden_states = [h.detach() for h in hidden_states]
 
         return input_ids, hidden_states
     # A function that extracts the representation of a given word in a sentence (first occurrence only)
@@ -159,6 +165,8 @@ class CWE(object):
         else:
             if layer is None:
                 layer = self.layers
+            elif layer == 'static' or 'pre':
+                layer = layer
             elif layer > self.layers:
                 raise ValueError(f"Number of layers specified ({layer}) exceed layers in model ({self.layers})!")
             # representations = hidden_states[torch.arange(num_inputs)[:, None], query_idx].mean(1)

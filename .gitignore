@@ -4,6 +4,7 @@ sandbox.ipynb
 tokenization.ipynb
 cwe.ipynb
 *.ipynb
+*.DS_Store
 samples.txt
 
 # remove logo from main doc
