@@ -80,8 +80,7 @@ class CWE(object):
             attention_mask = attention_mask.cpu()
 
         if layer == 'static' or layer == 'pre':
-            print("hmm")
-            hidden_states = [self.model.embeddings.word_embeddings.weight[i] for i in input_ids]
+            hidden_states = [self.model.embeddings.word_embeddings.weight.detach()[i] for i in input_ids]
             hidden_states = torch.stack(hidden_states)
             hidden_states = hidden_states * attention_mask
         else:
