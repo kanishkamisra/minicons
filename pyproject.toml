@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "minicons"
-version = "0.2.1"
+version = "0.2.2"
 description = "A package of useful functions to analyze transformer based language models."
 authors = ["Kanishka Misra <kmisra@purdue.edu>"]
 license = "MIT"
