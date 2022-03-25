@@ -1,10 +1,11 @@
-# minicons
+# minicons: Enabling Flexible Behavioral and Representational Analyses of Transformer Language Models
 
 [![Downloads](https://static.pepy.tech/personalized-badge/minicons?period=total&units=international_system&left_color=black&right_color=brightgreen&left_text=Downloads)](https://pepy.tech/project/minicons)
 
-Helper functions for analyzing Transformer based representations of language
-
 This repo is a wrapper around the `transformers` [library](https://huggingface.co/transformers) from hugging face :hugs:
+
+<!-- TODO: Description-->
+
 
 
 ## Installation
@@ -79,3 +80,17 @@ print(mlm_model.sequence_score(stimuli, reduction = lambda x: -x.sum(0).item()))
 
 ## Recent Updates
 - **November 6, 2021:** MLM scoring has been fixed! You can now use `model.token_score()` and `model.sequence_score()` with `MaskedLMScorers` as well!
+
+
+## Citation
+
+If you use `minicons`, please cite the following paper:
+
+```tex
+@article{misra2022minicons,
+    title={minicons: Enabling Flexible Behavioral and Representational Analyses of Transformer Language Models},
+    author={Kanishka Misra},
+    journal={arXiv preprint arXiv:2203.13112},
+    year={2022}
+}
+```
