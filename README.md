@@ -48,6 +48,7 @@ from minicons import scorer
 
 mlm_model = scorer.MaskedLMScorer('bert-base-uncased', 'cpu')
 ilm_model = scorer.IncrementalLMScorer('distilgpt2', 'cpu')
+s2s_model = scorer.Seq2SeqScorer('t5-base', 'cpu')
 
 stimuli = ["The keys to the cabinet are on the table.",
            "The keys to the cabinet is on the table."]
@@ -69,6 +70,16 @@ print(ilm_model.sequence_score(stimuli, reduction = lambda x: -x.sum(0).item()))
 print(mlm_model.sequence_score(stimuli, reduction = lambda x: -x.sum(0).item()))
 '''
 [13.962685585021973, 23.415111541748047]
+'''
+
+# Seq2seq scoring
+## Blank source sequence, target sequence specified in `stimuli`
+print(s2s_model.sequence_score(stimuli, source_format = 'blank')
+## Source sequence is the same as the target sequence in `stimuli`
+print(s2s_model.sequence_score(stimuli, source_format = 'copy')
+'''
+[-7.910910129547119, -7.835635185241699]
+[-10.555519104003906, -9.532546997070312]
 '''
 ```
 
