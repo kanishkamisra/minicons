@@ -1055,7 +1055,7 @@ class IncrementalLMScorer(LMScorer):
 
 class Seq2SeqScorer(LMScorer):
     """
-    Class for Autoregressive or Incremental (or left-to-right) language models such as GPT2, etc.
+    Class for encoder-decode language models such as T5, etc.
 
     :param model_name: name of the model, should either be a path
         to a model (.pt or .bin file) stored locally, or a
