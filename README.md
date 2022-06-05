@@ -54,10 +54,10 @@ stimuli = ["The keys to the cabinet are on the table.",
            "The keys to the cabinet is on the table."]
 
 # use sequence_score with different reduction options: 
-# Sequence Surprisal - lambda x: -x.sum(1)
-# Sequence Log-probability - lambda x: x.sum(1)
-# Sequence Surprisal, normalized by number of tokens - lambda x: -x.mean(1)
-# Sequence Log-probability, normalized by number of tokens - lambda x: x.mean(1)
+# Sequence Surprisal - lambda x: -x.sum(0).item()
+# Sequence Log-probability - lambda x: x.sum(0).item()
+# Sequence Surprisal, normalized by number of tokens - lambda x: -x.mean(0).item()
+# Sequence Log-probability, normalized by number of tokens - lambda x: x.mean(0).item()
 # and so on...
 
 print(ilm_model.sequence_score(stimuli, reduction = lambda x: -x.sum(0).item()))
