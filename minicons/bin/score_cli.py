@@ -6,7 +6,7 @@ import pandas as pd
 from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader
-from ..scorer import IncrementalLMScorer, MaskedLMScorer
+from ..scorer import IncrementalLMScorer, MaskedLMScorer, Seq2SeqScorer
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -19,8 +19,8 @@ def parse_args() -> argparse.Namespace:
         "--scorer",
         type=str,
         required=True,
-        choices=['incremental', 'masked'],
-        help="Language model type: either incremental or masked."
+        choices=['incremental', 'masked', 'seq2seq'],
+        help="Language model type: either incremental, masked, or seq2seq."
     )
 
     parser.add_argument(
@@ -133,7 +133,7 @@ def cli_token_score(self, batch, model_type, surprisal = False, prob = False, ba
 
     scores = [s.tolist() for s in scores]
 
-    if model_type == 'incremental':
+    if model_type == 'incremental' or model_type == 'seq2seq':
         indices = [[i for i in indexed if i != self.tokenizer.pad_token_id] for indexed in tokenized[0]['input_ids'].tolist()]
     else:
         indices = [[i.item() for i in indexed if i.item() != self.tokenizer.pad_token_id] for indexed in list(zip(*tokenized))[2]]
@@ -189,6 +189,8 @@ def main(args: argparse.Namespace):
         lm = IncrementalLMScorer(args.model, args.device)
     elif (modeltype == 'masked'):
         lm = MaskedLMScorer(args.model, args.device)
+    elif (modeltype == 'seq2seq'):
+        lm = Seq2SeqScorer(args.model, args.device)
     else:
         raise Exception("Incorrect scorer passed. Use either incremental or masked.")
     
