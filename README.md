@@ -91,7 +91,7 @@ print(s2s_model.sequence_score(stimuli, source_format = 'copy')
 
 ## Recent Updates
 - **November 6, 2021:** MLM scoring has been fixed! You can now use `model.token_score()` and `model.sequence_score()` with `MaskedLMScorers` as well!
-
+- **June 4, 2022:** Added support for Seq2seq models. Thanks to [Aaron Mueller](https://github.com/aaronmueller) 🥳
 
 ## Citation
 
