@@ -1055,7 +1055,7 @@ class IncrementalLMScorer(LMScorer):
 
 class Seq2SeqScorer(LMScorer):
     """
-    Class for encoder-decode language models such as T5, etc.
+    Class for Autoregressive or Incremental (or left-to-right) language models such as GPT2, etc.
 
     :param model_name: name of the model, should either be a path
         to a model (.pt or .bin file) stored locally, or a
@@ -1297,10 +1297,14 @@ class Seq2SeqScorer(LMScorer):
             return scores
 
     def sequence_score(self, batch, reduction = lambda x: x.mean(0).item(), base_two = False,
-                       source_format = 'blank'):
+                       source_format = 'blank', source = None):
         '''
         TODO: reduction should be a string, if it's a function, specify what kind of function. --> how to ensure it is always that type?
         '''
+        if source is not None:
+            assert len(source) == len(batch)
+            source_format = "custom"
+
         tokenized = self.prepare_text(batch)
         if source_format == 'blank':
             source = [""] * len(batch)
