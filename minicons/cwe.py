@@ -209,61 +209,62 @@ class CWE(object):
 
 
     def extract_paired_representations(self, sentence_words: Union[Tuple[str], List[Tuple[str]]], layer:int = None) -> Tuple:
-        raise NotImplementedError
-        # '''
-        # Extract representations of pairs of words from a given sentence
-        # from the model at a given layer.
+        '''
+        Extract representations of pairs of words from a given sentence
+        from the model at a given layer.
 
-        # :param ``Union[Tuple[str], List[Tuple[str]]]`` text: Input 
-        #     consisting of `[(sentence, word1, word2)]`, where sentence
-        #     is an input sentence, and word1, word2 are two words
-        #     present in the sentence that will be masked out.
-        # :param layer: layer from which the representations are 
-        #     extracted.
-        # :type layer: int
-        # :return: Tuple consisting of torch tensors or lists of torch
-        #     tensors corresponding to word representations
-        # '''
-        # sentences = [sentence_words] if isinstance(sentence_words[0], str) else sentence_words
+        :param ``Union[Tuple[str], List[Tuple[str]]]`` text: Input 
+            consisting of `[(sentence, word1, word2)]`, where sentence
+            is an input sentence, and word1, word2 are two words
+            present in the sentence that will be masked out.
+        :param layer: layer from which the representations are 
+            extracted.
+        :type layer: int
+        :return: Tuple consisting of torch tensors or lists of torch
+            tensors corresponding to word representations
+        '''
+        sentences = [sentence_words] if isinstance(sentence_words[0], str) else sentence_words
 
-        # num_inputs = len(sentences)
+        num_inputs = len(sentences)
 
-        # input_ids, hidden_states = self.encode_text(list(list(zip(*sentences))[0]), layer)
+        input_ids, hidden_states = self.encode_text(list(list(zip(*sentences))[0]), layer)
 
-        # if isinstance(sentences[0][1], str):
-        #     sentences = [(s, *find_paired_indices(s, w1, w2)) for s, w1, w2 in sentences]
+        if isinstance(sentences[0][1], str):
+            sentences = [(s, character_span(s, w1), character_span(s, w2)) for s, w1, w2 in sentences]
+
+        search_queries1 = []
+        search_queries2 = []
+        for s, idx1, idx2 in sentences:
+            if 0 in idx1:
+                search_queries1.append(self.tokenizer.encode_plus(f'{s[idx1[0]:idx1[1]]}', add_special_tokens = False)['input_ids'])
+            else:
+                ## this one really matters if we are using GPT2
+                search_queries1.append(self.tokenizer.encode_plus(f'{s[idx1[0]:idx1[1]]}', add_special_tokens = False)['input_ids'])
+            if 0 in idx2:
+                search_queries2.append(self.tokenizer.encode_plus(f'{s[idx2[0]:idx2[1]]}', add_special_tokens = False)['input_ids'])
+            else:
+                ## this one really matters if we are using GPT2
+                search_queries2.append(self.tokenizer.encode_plus(f'{s[idx2[0]:idx2[1]]}', add_special_tokens = False)['input_ids'])
+
+        # search_queries1 = [self.tokenizer.encode_plus(f'{" ".join(s.split()[idx1[0]:idx1[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
+        # search_queries2 = [self.tokenizer.encode_plus(f'{" ".join(s.split()[idx2[0]:idx2[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
+
+        query_idx1 = list(map(lambda x: find_pattern(x[0], x[1]), zip(search_queries1, input_ids.tolist())))
+        query_idx2 = list(map(lambda x: find_pattern(x[0], x[1]), zip(search_queries2, input_ids.tolist())))
+
+        if isinstance(layer, list) or layer == 'all':
+            # representations = list(map(lambda x: x[torch.arange(num_inputs)[:, None], query_idx].mean(1), hidden_states))
+            representations1 = list(map(lambda x: torch.stack([hs.squeeze()[idx[0]:idx[1]].mean(0) for hs, idx in zip(x.split([1] * num_inputs), query_idx1)]), hidden_states))
+            representations2 = list(map(lambda x: torch.stack([hs.squeeze()[idx[0]:idx[1]].mean(0) for hs, idx in zip(x.split([1] * num_inputs), query_idx2)]), hidden_states))
+        else:
+            if layer is None:
+                layer = self.layers
+            elif layer == 'static' or 'pre':
+                layer = layer
+            elif layer > self.layers:
+                raise ValueError(f"Number of layers specified ({layer}) exceed layers in model ({self.layers})!")
+            # representations = hidden_states[torch.arange(num_inputs)[:, None], query_idx].mean(1)
+            representations1 = torch.stack([hs.squeeze()[idx[0]:idx[1]].mean(0) for hs, idx in zip(hidden_states.split([1] * num_inputs), query_idx1)])
+            representations2 = torch.stack([hs.squeeze()[idx[0]:idx[1]].mean(0) for hs, idx in zip(hidden_states.split([1] * num_inputs), query_idx2)])
         
-        # search_queries1 = []
-        # for s, idx1, idx2 in sentences:
-        #     if 0 in idx1:
-        #         search_queries1.append(self.tokenizer.encode_plus(f'{" ".join(s.split()[idx1[0]:idx1[1]])}', add_special_tokens = False)['input_ids'])
-        #     else:
-        #         ## this one really matters if we are using GPT2
-        #         search_queries1.append(self.tokenizer.encode_plus(f' {" ".join(s.split()[idx1[0]:idx1[1]])}', add_special_tokens = False)['input_ids'])
-
-        # search_queries2 = []
-        # for s, idx1, idx2 in sentences:
-        #     if 0 in idx2:
-        #         search_queries2.append(self.tokenizer.encode_plus(f'{" ".join(s.split()[idx2[0]:idx2[1]])}', add_special_tokens = False)['input_ids'])
-        #     else:
-        #         ## this one really matters if we are using GPT2
-        #         search_queries2.append(self.tokenizer.encode_plus(f' {" ".join(s.split()[idx2[0]:idx2[1]])}', add_special_tokens = False)['input_ids'])
-
-        # # search_queries1 = [self.tokenizer.encode_plus(f'{" ".join(s.split()[idx1[0]:idx1[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
-        # # search_queries2 = [self.tokenizer.encode_plus(f'{" ".join(s.split()[idx2[0]:idx2[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
-
-        # query_idx1 = list(map(lambda x: find_pattern(x[0], x[1]), zip(search_queries1, input_ids.tolist())))
-        # query_idx2 = list(map(lambda x: find_pattern(x[0], x[1]), zip(search_queries2, input_ids.tolist())))
-
-        # if layer != 'all':
-        #     if layer is None:
-        #         layer = self.layers
-        #     elif layer > self.layers:
-        #         raise ValueError(f"Number of layers specified ({layer}) exceed layers in model ({self.layers})!")
-        #     representations1 = torch.stack([hs.squeeze()[idx[0]:idx[1]].mean(0) for hs, idx in zip(hidden_states.split([1] * num_inputs), query_idx1)])
-        #     representations2 = torch.stack([hs.squeeze()[idx[0]:idx[1]].mean(0) for hs, idx in zip(hidden_states.split([1] * num_inputs), query_idx2)])
-        # else:
-        #     representations1 = list(map(lambda x: torch.stack([hs.squeeze()[idx[0]:idx[1]].mean(0) for hs, idx in zip(x.split([1] * num_inputs), query_idx1)]), hidden_states))
-        #     representations2 = list(map(lambda x: torch.stack([hs.squeeze()[idx[0]:idx[1]].mean(0) for hs, idx in zip(x.split([1] * num_inputs), query_idx2)]), hidden_states))
-        
-        # return representations1, representations2
+        return representations1, representations2
