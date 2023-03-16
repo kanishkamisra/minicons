@@ -154,3 +154,16 @@ print(np.mean([g > b for g,b in zip(good_scores, bad_scores)]))
 
 # 0.804
 ```
+
+## Sidenote: Computing conditional log-probabilities
+
+`minicons` also allows you to compute conditional log probabilities, using the `partial_score` function! The arguments for this are the same as in `sequence_score` except that it now takes two forms of text inputs: a batch of prefixes and a batch of queries. Let's say you wanted to compute the log-probability of "can fly" given "a robin" vs. "a penguin": 
+
+```py
+prefixes = ['a robin', 'a penguin']
+queries = ['can fly'] * 2
+
+model.partial_score(prefixes, queries) # we will use the default reduction method, which computes log-probability per token
+
+# [-4.762691497802734, -4.574714660644531]
+```
