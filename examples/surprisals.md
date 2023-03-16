@@ -112,13 +112,13 @@ model.token_score(sentences, surprisal = True, base_two = True)
 '''
 ```
 
-You can also compute the overall sentence scores by using the `model.sequence_score()` function. By default it does so by normalizing the summed log probability score and dividing it by the length. To only get the overall log-probability, one would pass `reduction = lambda x: x.sum(1)` (for surprisals pass `lambda x: -x.sum(1)`) as an argument:
+You can also compute the overall sentence scores by using the `model.sequence_score()` function. By default it does so by normalizing the summed log probability score and dividing it by the length. To only get the overall log-probability, one would pass `reduction = lambda x: x.sum(0)` (for surprisals pass `lambda x: -x.sum(0)`) as an argument:
 
 ```py
-model.sequence_score(["The sketch of those trucks hasn't", "The sketch of those trucks haven't"], reduction = x.sum(1))
+model.sequence_score(["The sketch of those trucks hasn't", "The sketch of those trucks haven't"], reduction = lambda x: x.sum(0))
 
 # Log probabilities of the sentences:
-# tensor([-37.6981, -39.6865])
+# [tensor(-37.6981), tensor(-39.6865)]
 ```
 
 Finally, `minicons` also facilitates large-scale experiments. For example, let's run our test of GPT2-small's behavior on the full number-agreement task from BLiMP:
@@ -145,8 +145,8 @@ good_scores = []
 bad_scores = []
 for batch in stimuli_dl:
     good, bad = batch
-    good_scores.extend(model.sequence_score(good), reduction = lambda x: x.sum(1))
-    bad_scores.extend(model.sequence_score(bad), reduction = lambda x: x.sum(1))
+    good_scores.extend(model.sequence_score(good), reduction = lambda x: x.sum(0))
+    bad_scores.extend(model.sequence_score(bad), reduction = lambda x: x.sum(0))
 
 
 # Testing the extent to which GPT2-small shows patterns of number-agreement:
