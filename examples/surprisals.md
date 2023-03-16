@@ -1,6 +1,6 @@
-## Calculating surprisals with transformer models using minicons
+## Calculating logprobs/surprisals with transformer models using minicons
 
-This brief document shows how one can calculate surprisals for sentences using models such as `gpt` and `gpt2`. 
+This brief document shows how one can calculate log probability (and its modified variants like susprisals) for sentences using models such as `gpt` and `gpt2`. 
 
 For demonstration purposes I will use `gpt2`(small) from Huggingface, and evaluate it on a number agreement task from the [BLiMP dataset](https://github.com/alexwarstadt/blimp/). This task specifically tests whether the model assigns greater probability to "hasn't" as compared to "haven't" in pairs of stimuli such as (1) and (2):
 
@@ -8,7 +8,7 @@ For demonstration purposes I will use `gpt2`(small) from Huggingface, and evalua
 
 (2) The sketch of those trucks haven't
 
-Converting this into a hypothesis dealing with surprisals, the model should therefore be "more surprised" to see (2) than (1).
+Converting this into a hypothesis dealing with surprisals, the model should be "more surprised" to see (2) than (1).
 
 `minicons` helps in performing such experiments:
 
@@ -112,7 +112,7 @@ model.token_score(sentences, surprisal = True, base_two = True)
 '''
 ```
 
-You can also compute the overall sentence scores by using the `model.sequence_score()` function. By default it does so by normalizing the summed log probability score and dividing it by the length. To only get the overall log-probability, one would pass `reduction = lambda x: x.sum(0)` (for surprisals pass `lambda x: -x.sum(0)`) as an argument:
+You can also compute the overall sentence scores by using the `model.sequence_score()` function. By default it does so by normalizing the summed log probability score and dividing it by the length (i.e., number of tokens). To only get the overall log-probability, one would pass `reduction = lambda x: x.sum(0)` (for surprisals pass `lambda x: -x.sum(0)`) as an argument:
 
 ```py
 model.sequence_score(["The sketch of those trucks hasn't", "The sketch of those trucks haven't"], reduction = lambda x: x.sum(0))
