@@ -1,8 +1,8 @@
 ## Calculating logprobs/surprisals with transformer models using minicons
 
-This brief document shows how one can calculate log probability (and its modified variants like susprisals) for sentences using models such as `gpt` and `gpt2`. 
+This brief document shows how one can calculate log probability (and its modified variants like surprisals) for sentences using autoregressive models such as `gpt` and `gpt2`. 
 
-For demonstration purposes I will use `gpt2`(small) from Huggingface, and evaluate it on a number agreement task from the [BLiMP dataset](https://github.com/alexwarstadt/blimp/). This task specifically tests whether the model assigns greater probability to "hasn't" as compared to "haven't" in pairs of stimuli such as (1) and (2):
+For demonstration purposes I will use `gpt2`(small) from Huggingface, and evaluate it on a number agreement task from the [BLiMP dataset](https://github.com/alexwarstadt/blimp/). This task specifically tests whether the model assigns greater (log)probability to "hasn't" as compared to "haven't" in pairs of stimuli such as (1) and (2):
 
 (1) The sketch of those trucks hasn't 
 
@@ -21,7 +21,7 @@ import numpy as np
 
 import json
 ```
-Incremental models can be instantiated using:
+Incremental/Autoregressive models can be instantiated using:
 ```py
 # Warning: This will download a 550mb model file if you do not already have it!
 model = scorer.IncrementalLMScorer('gpt2', 'cpu')
