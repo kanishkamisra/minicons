@@ -145,8 +145,8 @@ good_scores = []
 bad_scores = []
 for batch in stimuli_dl:
     good, bad = batch
-    good_scores.extend(model.sequence_score(good), reduction = lambda x: x.sum(0))
-    bad_scores.extend(model.sequence_score(bad), reduction = lambda x: x.sum(0))
+    good_scores.extend(model.sequence_score(good, reduction = lambda x: x.sum(0)))
+    bad_scores.extend(model.sequence_score(bad, reduction = lambda x: x.sum(0)))
 
 
 # Testing the extent to which GPT2-small shows patterns of number-agreement:
