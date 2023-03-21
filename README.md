@@ -39,6 +39,16 @@ tensor([[ 0.5399, -0.2461, -0.0968,  ..., -0.4670, -0.5312, -0.0549],
         [-0.8258, -0.4308,  0.2744,  ..., -0.5987, -0.6984,  0.2087]],
        grad_fn=<MeanBackward1>)
 '''
+
+# if model is seq2seq:
+model = cwe.EncDecCWE('t5-small')
+
+print(model.extract_representation(context_words))
+
+'''(last layer, by default)
+tensor([[-0.0895,  0.0758,  0.0753,  ...,  0.0130, -0.1093, -0.2354],
+        [-0.0695,  0.1142,  0.0803,  ...,  0.0807, -0.1139, -0.2888]])
+'''
 ```
 
 2. Compute sentence acceptability measures (surprisals) using Word Prediction Models:
@@ -74,9 +84,9 @@ print(mlm_model.sequence_score(stimuli, reduction = lambda x: -x.sum(0).item()))
 
 # Seq2seq scoring
 ## Blank source sequence, target sequence specified in `stimuli`
-print(s2s_model.sequence_score(stimuli, source_format = 'blank')
+print(s2s_model.sequence_score(stimuli, source_format = 'blank'))
 ## Source sequence is the same as the target sequence in `stimuli`
-print(s2s_model.sequence_score(stimuli, source_format = 'copy')
+print(s2s_model.sequence_score(stimuli, source_format = 'copy'))
 '''
 [-7.910910129547119, -7.835635185241699]
 [-10.555519104003906, -9.532546997070312]

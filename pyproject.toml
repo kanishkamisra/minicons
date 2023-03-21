@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "minicons"
-version = "0.2.6"
+version = "0.2.10"
 description = "A package of useful functions to analyze transformer based language models."
 authors = ["Kanishka Misra <kmisra@purdue.edu>", "Aaron Mueller <amueller@jhu.edu>"]
 license = "MIT"
@@ -25,6 +25,9 @@ jupyter = "^1.0.0"
 Sphinx = "^4.3.1"
 furo = "^2021.11.23"
 myst-parser = "^0.16.0"
+
+[tool.poetry.group.dev.dependencies]
+black = "^23.1.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
