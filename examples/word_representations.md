@@ -11,8 +11,9 @@ For demonstration purposes, let's use the `bert-base-uncased` model to extract c
 This tutorial requires the following packages:
 
 ```
-minicons==0.1.15
-torch>=1.8.0
+minicons
+torch
+transformers
 ```
 
 ### Importing libraries

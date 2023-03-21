@@ -1,14 +1,14 @@
-## Calculating surprisals with transformer models using minicons
+## Calculating logprobs/surprisals with transformer models using minicons
 
-This brief document shows how one can calculate surprisals for sentences using models such as `gpt` and `gpt2`. 
+This brief document shows how one can calculate log probability (and its modified variants like surprisals) for sentences using autoregressive models such as `gpt` and `gpt2`. 
 
-For demonstration purposes I will use `gpt2`(small) from Huggingface, and evaluate it on a number agreement task from the [BLiMP dataset](https://github.com/alexwarstadt/blimp/). This task specifically tests whether the model assigns greater probability to "hasn't" as compared to "haven't" in pairs of stimuli such as (1) and (2):
+For demonstration purposes I will use `gpt2`(small) from Huggingface, and evaluate it on a number agreement task from the [BLiMP dataset](https://github.com/alexwarstadt/blimp/). This task specifically tests whether the model assigns greater (log)probability to "hasn't" as compared to "haven't" in pairs of stimuli such as (1) and (2):
 
 (1) The sketch of those trucks hasn't 
 
 (2) The sketch of those trucks haven't
 
-Converting this into a hypothesis dealing with surprisals, the model should therefore be "more surprised" to see (2) than (1).
+Converting this into a hypothesis dealing with surprisals, the model should be "more surprised" to see (2) than (1).
 
 `minicons` helps in performing such experiments:
 
@@ -21,7 +21,7 @@ import numpy as np
 
 import json
 ```
-Incremental models can be instantiated using:
+Incremental/Autoregressive models can be instantiated using:
 ```py
 # Warning: This will download a 550mb model file if you do not already have it!
 model = scorer.IncrementalLMScorer('gpt2', 'cpu')
@@ -112,13 +112,13 @@ model.token_score(sentences, surprisal = True, base_two = True)
 '''
 ```
 
-You can also compute the overall sentence scores by using the `model.sequence_score()` function. By default it does so by normalizing the summed log probability score and dividing it by the length. To only get the overall log-probability, one would pass `reduction = lambda x: x.sum(1)` (for surprisals pass `lambda x: -x.sum(1)`) as an argument:
+You can also compute the overall sentence scores by using the `model.sequence_score()` function. By default it does so by normalizing the summed log probability score and dividing it by the length (i.e., number of tokens). To only get the overall log-probability, one would pass `reduction = lambda x: x.sum(0)` (for surprisals pass `lambda x: -x.sum(0)`) as an argument:
 
 ```py
-model.sequence_score(["The sketch of those trucks hasn't", "The sketch of those trucks haven't"], reduction = x.sum(1))
+model.sequence_score(["The sketch of those trucks hasn't", "The sketch of those trucks haven't"], reduction = lambda x: x.sum(0))
 
 # Log probabilities of the sentences:
-# tensor([-37.6981, -39.6865])
+# [tensor(-37.6981), tensor(-39.6865)]
 ```
 
 Finally, `minicons` also facilitates large-scale experiments. For example, let's run our test of GPT2-small's behavior on the full number-agreement task from BLiMP:
@@ -145,12 +145,25 @@ good_scores = []
 bad_scores = []
 for batch in stimuli_dl:
     good, bad = batch
-    good_scores.extend(model.sequence_score(good), reduction = lambda x: x.sum(1))
-    bad_scores.extend(model.sequence_score(bad), reduction = lambda x: x.sum(1))
+    good_scores.extend(model.sequence_score(good, reduction = lambda x: x.sum(0)))
+    bad_scores.extend(model.sequence_score(bad, reduction = lambda x: x.sum(0)))
 
 
 # Testing the extent to which GPT2-small shows patterns of number-agreement:
 print(np.mean([g > b for g,b in zip(good_scores, bad_scores)]))
 
 # 0.804
+```
+
+## Sidenote: Computing conditional log-probabilities
+
+`minicons` also allows you to compute conditional log probabilities, using the `partial_score` function! The arguments for this are the same as in `sequence_score` except that it now takes two forms of text inputs: a batch of prefixes and a batch of queries. Let's say you wanted to compute the log-probability of "can fly" given "a robin" vs. "a penguin": 
+
+```py
+prefixes = ['a robin', 'a penguin']
+queries = ['can fly'] * 2
+
+model.partial_score(prefixes, queries) # we will use the default reduction method, which computes log-probability per token
+
+# [-4.762691497802734, -4.574714660644531]
 ```
