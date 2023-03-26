@@ -1353,6 +1353,7 @@ class IncrementalLMScorer(LMScorer):
         labels: Iterable,
         reduction=lambda x: x.sum(0),
         inference=False,
+        probs=False,
     ) -> Union[Tuple[str, float], List[float]]:
         """
         Returns log probabilities for a fixed set of labels (continuation)
@@ -1362,6 +1363,7 @@ class IncrementalLMScorer(LMScorer):
         :param `Iterable` labels: Label strings.
         :param reduction: reduction function.
         :param inference: whether or not to return argmax labels.
+        :param probs: whether or nor to return relative probabilities.
 
         :return: List of LM score metrics (probability and rank)
             and tokens.
@@ -1394,6 +1396,9 @@ class IncrementalLMScorer(LMScorer):
         logprobs = batch_wise_logprobs(logprobs, filter_ids, reduction)
 
         self.tokenizer.padding_side = self.padding_side
+
+        if probs:
+            logprobs = logprobs.softmax(1)
 
         if inference:
             predictions = logprobs.argmax(1)
