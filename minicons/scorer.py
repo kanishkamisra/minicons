@@ -1380,6 +1380,7 @@ class IncrementalLMScorer(LMScorer):
 
         self.tokenizer.padding_side = "left"
         tokenized = self.tokenizer(batch, return_tensors="pt", padding=True)
+        tokenized = tokenized.to(self.device)
 
         outputs = self.model.generate(
             **tokenized,
@@ -1388,8 +1389,10 @@ class IncrementalLMScorer(LMScorer):
             output_scores=True,
         )
 
+        output_scores = outputs.scores.detach().cpu()
+
         logprobs = []
-        for i, score in enumerate(outputs.scores):
+        for i, score in enumerate(output_scores):
             score = score - score.logsumexp(1).unsqueeze(1)
             logprobs.append(score[:, label_ids_unzipped[i]])
 
