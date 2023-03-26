@@ -2,6 +2,11 @@
 from typing import Iterable, Union, List, Dict, Optional, Callable, Tuple, Any
 
 import torch
+import warnings
+
+from collections import defaultdict
+from itertools import chain
+from re import sub
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForMaskedLM,
@@ -10,12 +15,7 @@ from transformers import (
 )
 from transformers.utils.logging import set_verbosity_error
 
-from collections import defaultdict
-
-from itertools import chain
-from re import sub
-
-import warnings
+from .utils import batch_wise_logprobs
 
 set_verbosity_error()
 
@@ -930,20 +930,19 @@ class IncrementalLMScorer(LMScorer):
 
         # define CLS and SEP tokens
         if self.tokenizer.pad_token is None:
-            self.tokenizer.add_special_tokens(
-                {"additional_special_tokens": ["<|pad|>"]}
-            )
-            self.tokenizer.pad_token = "<|pad|>"
+            if self.tokenizer.eos_token is not None:
+                self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+            else:
+                self.tokenizer.add_special_tokens(
+                    {"additional_special_tokens": ["<|pad|>"]}
+                )
+                self.tokenizer.pad_token = "<|pad|>"
+                self.model.resize_token_embeddings(len(self.tokenizer))
 
-        if self.tokenizer.bos_token is None:
-            self.tokenizer.add_special_tokens(
-                {"additional_special_tokens": ["<|bos|>"]}
-            )
-            self.tokenizer.bos_token = "<|bos|>"
-
-        self.model.resize_token_embeddings(len(self.tokenizer))
         self.model.to(self.device)
         self.model.eval()
+
+        self.padding_side = self.tokenizer.padding_side
 
     def add_special_tokens(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
         """
@@ -1130,7 +1129,9 @@ class IncrementalLMScorer(LMScorer):
 
         for logit, idx, offset in zip(logits, effective_ids, offsets):
             length = len(idx)
-            logit = logit.squeeze(0)[:, :-1][torch.arange(offset, length),]
+            logit = logit.squeeze(0)[:, :-1][
+                torch.arange(offset, length),
+            ]
 
             logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
             query_ids = idx[offset:]
@@ -1345,6 +1346,62 @@ class IncrementalLMScorer(LMScorer):
             # output = (sent_log_probs.sum(), sent_ids, sent_tokens)
             # outputs.append(output)
         return outputs
+
+    def fixed_label_score(
+        self,
+        batch: Iterable,
+        labels: Iterable,
+        reduction=lambda x: x.sum(0),
+        inference=False,
+    ) -> Union[Tuple[str, float], List[float]]:
+        """
+        Returns log probabilities for a fixed set of labels (continuation)
+        given a batch of prefixes.
+
+        :param `Iterable` batch: Batch of inputs.
+        :param `Iterable` labels: Label strings.
+        :param reduction: reduction function.
+        :param inference: whether or not to return argmax labels.
+
+        :return: List of LM score metrics (probability and rank)
+            and tokens.
+        :rtype: Union[Tuple[str, float], List[float]]
+        """
+        labels_with_space = [f" {l.strip()}" for l in labels]
+        label_ids = self.tokenizer(labels_with_space, padding=True).input_ids
+        label_ids_unzipped = list(zip(*label_ids))
+
+        filter_ids = [
+            list(range(len([i for i in j if i != self.tokenizer.pad_token_id])))
+            for j in label_ids
+        ]
+
+        self.tokenizer.padding_side = "left"
+        tokenized = self.tokenizer(batch, return_tensors="pt", padding=True)
+
+        outputs = self.model.generate(
+            **tokenized,
+            max_new_tokens=len(label_ids_unzipped),
+            return_dict_in_generate=True,
+            output_scores=True,
+        )
+
+        logprobs = []
+        for i, score in enumerate(outputs.scores):
+            score = score - score.logsumexp(1).unsqueeze(1)
+            logprobs.append(score[:, label_ids_unzipped[i]])
+
+        logprobs = batch_wise_logprobs(logprobs, filter_ids, reduction)
+
+        self.tokenizer.padding_side = self.padding_side
+
+        if inference:
+            predictions = logprobs.argmax(1)
+            predicted_labels = [labels[i] for i in predictions.tolist()]
+            lps = logprobs[torch.arange(len(batch)), predictions].tolist()
+            return predicted_labels, lps
+        else:
+            return logprobs
 
 
 class Seq2SeqScorer(LMScorer):
@@ -1585,7 +1642,9 @@ class Seq2SeqScorer(LMScorer):
 
         for logit, idx, offset in zip(logits, target_effective_ids, target_offsets):
             length = len(idx)
-            logit = logit.squeeze(0)[:, :-1][torch.arange(offset, length),]
+            logit = logit.squeeze(0)[:, :-1][
+                torch.arange(offset, length),
+            ]
 
             logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
             query_ids = idx[offset:]
