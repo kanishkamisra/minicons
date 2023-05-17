@@ -1389,10 +1389,8 @@ class IncrementalLMScorer(LMScorer):
             output_scores=True,
         )
 
-        output_scores = outputs.scores.detach().cpu()
-
         logprobs = []
-        for i, score in enumerate(output_scores):
+        for i, score in enumerate(outputs.scores):
             score = score - score.logsumexp(1).unsqueeze(1)
             logprobs.append(score[:, label_ids_unzipped[i]])
 
