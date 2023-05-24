@@ -2,7 +2,7 @@
 
 [![Downloads](https://static.pepy.tech/personalized-badge/minicons?period=total&units=international_system&left_color=black&right_color=brightgreen&left_text=Downloads)](https://pepy.tech/project/minicons)
 
-This repo is a wrapper around the `transformers` [library](https://huggingface.co/transformers) from hugging face :hugs:
+This repo is a wrapper around the `transformers` [library](https://huggingface.co/transformers) from Hugging Face :hugs:
 
 <!-- TODO: Description-->
 
