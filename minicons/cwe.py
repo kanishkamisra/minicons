@@ -14,7 +14,7 @@ class CWE(object):
     """
     Implements the contextualized word embedding class to
     facilitate extraction of word representations from a given
-    transformer model.
+    transformer model. [TEST]
 
     :param model_name: name of the model, should either be a path
         to a model (.pt or .bin file) stored locally, or a

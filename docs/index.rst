@@ -1,15 +1,20 @@
 .. minicons documentation master file, created by
-   sphinx-quickstart on Thu Dec  9 23:54:05 2021.
+   sphinx-quickstart on Wed May 17 17:09:45 2023.
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to minicons' documentation!
+Welcome to minicons's documentation!
 ====================================
 
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
 
-   modules
 
-Minicons logo made by `Flat Icons <https://www.flaticon.com/authors/flat-icons>`_ from `flaticon <https://www.flaticon.com/>`_.
+
+Indices and tables
+==================
+
+* :ref:`genindex`
+* :ref:`modindex`
+* :ref:`search`

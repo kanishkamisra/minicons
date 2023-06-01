@@ -200,6 +200,8 @@ class LMScorer:
         prefix: Union[str, List[str]],
         stimuli: Union[str, List[str]],
         reduction: Callable = lambda x: x.mean(0).item(),
+        bos_token=False,
+        eos_token=False,
         **kwargs,
     ) -> List[float]:
         """
@@ -227,9 +229,11 @@ class LMScorer:
         :return: List of floats specifying the desired score for the stimuli part of the input, e.g., P(stimuli | preamble).
         :rtype: ``List[float]``
         """
-        result = self.compute_stats(
-            self.prime_text(prefix, stimuli), **kwargs, return_tensors=True
-        )
+        if bos_token or eos_token:
+            primed = self.prime_text(prefix, stimuli, bos_token, eos_token)
+        else:
+            primed = self.prime_text(prefix, stimuli)
+        result = self.compute_stats(primed, return_tensors=True, **kwargs)
         logprob = result
         reduced = list(map(reduction, logprob))
 
@@ -944,28 +948,63 @@ class IncrementalLMScorer(LMScorer):
 
         self.padding_side = self.tokenizer.padding_side
 
-    def add_special_tokens(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
+    def add_special_tokens(
+        self,
+        text: Union[str, List[str]],
+        bos_token: bool = False,
+        eos_token: bool = False,
+    ) -> Union[str, List[str]]:
         """
         Reformats input text to add special model-dependent tokens.
 
         :param text: single string or batch of strings to be
             modified.
         :type text: Union[str, List[str]]
+        :param bos_token: Whether the bos_token should be added in the beginning.
+        :type bos_token: bool
+        :param bos_token: Whether the eos_token should be added at the end.
+        :type bos_token: bool
 
         :return: Modified input, containing special tokens as per
             tokenizer specification
         :rtype: Union[float, List[float]]:
         """
+
+        def _format(self, text, bos, eos):
+            if bos:
+                text = self.tokenizer.bos_token + text
+            if eos:
+                text = text + self.tokenizer.eos_token
+            return text
+
         sentences = [text] if isinstance(text, str) else text
-        sentences = [self.tokenizer.bos_token + sentence for sentence in sentences]
+        sentences = [_format(text, bos_token, eos_token) for text in sentences]
 
         return sentences
 
-    def encode(self, text: Union[str, List[str]]) -> dict:
+    def encode(
+        self,
+        text: Union[str, List[str]],
+        bos_token: bool = False,
+        eos_token: bool = False,
+    ) -> dict:
+        def _format(self, text, bos, eos):
+            if bos:
+                text = self.tokenizer.bos_token + text
+            if eos:
+                text = text + self.tokenizer.eos_token
+            return text
+
         text = [text] if isinstance(text, str) else text
+        text = [_format(self, t, bos_token, eos_token) for t in text]
         return self.tokenizer(text, return_tensors="pt", padding=True)
 
-    def prepare_text(self, text: Union[str, List[str]]) -> Tuple:
+    def prepare_text(
+        self,
+        text: Union[str, List[str]],
+        bos_token: bool = False,
+        eos_token: bool = False,
+    ) -> Tuple:
         """
         Prepares a batch of input text into a format fit to run LM
         scoring on.
@@ -975,12 +1014,16 @@ class IncrementalLMScorer(LMScorer):
         :return: Batch of formatted input that can be passed to
             ``compute_stats``
         """
-        encoded = self.encode(text)
+        encoded = self.encode(text, bos_token, eos_token)
         offsets = [0] * len(encoded["input_ids"])
         return encoded, offsets
 
     def prime_text(
-        self, preamble: Union[str, List[str]], stimuli: Union[str, List[str]]
+        self,
+        preamble: Union[str, List[str]],
+        stimuli: Union[str, List[str]],
+        bos_token=False,
+        eos_token=False,
     ) -> Tuple:
         """
         Prepares a batch of input text into a format fit to run LM
@@ -996,16 +1039,16 @@ class IncrementalLMScorer(LMScorer):
         preamble_encoded = self.tokenizer(preamble_text)["input_ids"]
         preamble_lens = []
         for preamble_tokens in preamble_encoded:
+            if bos_token:
+                restricted_id = float("inf")
+                bos_offset = 1
+            else:
+                restricted_id = self.tokenizer.pad_token_id
+                bos_offset = 0
             preamble_lens.append(
-                len(
-                    [
-                        token
-                        for token in preamble_tokens
-                        if token != self.tokenizer.pad_token_id
-                        and token != self.tokenizer.sep_token_id
-                    ]
-                )
+                len([token for token in preamble_tokens if token != restricted_id])
                 - 1
+                + bos_offset
             )
 
         sentences = (
@@ -1014,7 +1057,7 @@ class IncrementalLMScorer(LMScorer):
             else [p + " " + s for p, s in list(zip(preamble, stimuli))]
         )
 
-        return self.encode(sentences), preamble_lens
+        return self.encode(sentences, bos_token, eos_token), preamble_lens
 
     def distribution(self, batch: Iterable) -> torch.Tensor:
         """
@@ -1107,9 +1150,15 @@ class IncrementalLMScorer(LMScorer):
         encoded, offsets = batch
         encoded = encoded.to(self.device)
 
+        # ids = [
+        #     [i for i in instance if i != self.tokenizer.pad_token_id]
+        #     for instance in encoded["input_ids"].tolist()
+        # ]
         ids = [
-            [i for i in instance if i != self.tokenizer.pad_token_id]
-            for instance in encoded["input_ids"].tolist()
+            [i for i, am in zip(instance, attention_mask) if am != 0]
+            for instance, attention_mask in zip(
+                encoded["input_ids"].tolist(), encoded["attention_mask"].tolist()
+            )
         ]
 
         ## Ignore the probabilities of the first token.
@@ -1118,7 +1167,7 @@ class IncrementalLMScorer(LMScorer):
         with torch.no_grad():
             logits = self.model(**encoded).logits.detach()
 
-        logits[:, :, self.tokenizer.pad_token_id] = float("-inf")
+        # logits[:, :, self.tokenizer.pad_token_id] = float("-inf")
 
         logits = logits.split([1] * len(offsets))
 
@@ -1129,9 +1178,10 @@ class IncrementalLMScorer(LMScorer):
 
         for logit, idx, offset in zip(logits, effective_ids, offsets):
             length = len(idx)
-            logit = logit.squeeze(0)[:, :-1][
-                torch.arange(offset, length),
-            ]
+            if idx[-1] == self.tokenizer.eos_token_id:
+                logit = logit.squeeze(0)[torch.arange(offset, length),]
+            else:
+                logit = logit.squeeze(0)[:, :-1][torch.arange(offset, length),]
 
             logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
             query_ids = idx[offset:]
@@ -1186,12 +1236,12 @@ class IncrementalLMScorer(LMScorer):
             return scores
 
     def sequence_score(
-        self, batch, reduction=lambda x: x.mean(0).item(), base_two=False
+        self, batch, reduction=lambda x: x.mean(0).item(), base_two=False, **kwargs
     ):
         """
         TODO: reduction should be a string, if it's a function, specify what kind of function. --> how to ensure it is always that type?
         """
-        tokenized = self.prepare_text(batch)
+        tokenized = self.prepare_text(batch, **kwargs)
         scores = self.compute_stats(
             tokenized, rank=False, base_two=base_two, return_tensors=True
         )
@@ -1205,6 +1255,8 @@ class IncrementalLMScorer(LMScorer):
         prob: bool = False,
         base_two: bool = False,
         rank: bool = False,
+        decode: bool = True,
+        **kwargs,
     ) -> Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]:
         """
         For every input sentence, returns a list of tuples in the following format:
@@ -1229,7 +1281,7 @@ class IncrementalLMScorer(LMScorer):
             base_two and prob
         ), "cannot both use base (which is for a log), and a probability measure at the same time!"
 
-        tokenized = self.prepare_text(batch)
+        tokenized = self.prepare_text(batch, **kwargs)
         if rank:
             scores, ranks = self.compute_stats(
                 tokenized, rank=rank, prob=prob, base_two=base_two, return_tensors=True
@@ -1244,11 +1296,22 @@ class IncrementalLMScorer(LMScorer):
 
         scores = [s.tolist() for s in scores]
 
+        # indices = [
+        #     [i for i in indexed if i != self.tokenizer.pad_token_id]
+        #     for indexed in tokenized[0]["input_ids"].tolist()
+        # ]
+
         indices = [
-            [i for i in indexed if i != self.tokenizer.pad_token_id]
-            for indexed in tokenized[0]["input_ids"].tolist()
+            [i for i, am in zip(instance, attention_mask) if am != 0]
+            for instance, attention_mask in zip(
+                tokenized[0]["input_ids"].tolist(),
+                tokenized[0]["attention_mask"].tolist(),
+            )
         ]
-        tokens = [self.decode(idx) for idx in indices]
+        if decode:
+            tokens = [self.decode(idx) for idx in indices]
+        else:
+            tokens = [self.tokenizer.convert_ids_to_tokens(idx) for idx in indices]
 
         if rank:
             assert len(tokens) == len(scores) == len(ranks)
@@ -1648,9 +1711,7 @@ class Seq2SeqScorer(LMScorer):
 
         for logit, idx, offset in zip(logits, target_effective_ids, target_offsets):
             length = len(idx)
-            logit = logit.squeeze(0)[:, :-1][
-                torch.arange(offset, length),
-            ]
+            logit = logit.squeeze(0)[:, :-1][torch.arange(offset, length),]
 
             logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
             query_ids = idx[offset:]
