@@ -93,6 +93,45 @@ print(s2s_model.sequence_score(stimuli, source_format = 'copy'))
 '''
 ```
 
+## A better version of MLM Scoring by Kauf and Ivanova
+
+This version leverages a locally-autoregressive scoring strategy to avoid the overestimation of probabilities of tokens in multi-token words (e.g., "ostrich" -> "ostr" + "#ich"). In particular, tokens probabilities are estimated using the bidirectional context, excluding any future tokens that belong to the same word as the current target token.
+
+For more details, refer to [Kauf and Ivanova, 2023](https://arxiv.org/abs/2305.10588)
+
+```py
+from minicons import scorer
+mlm_model = scorer.MaskedLMScorer('bert-base-uncased', 'cpu')
+
+stimuli = ['The traveler lost the souvenir.']
+
+# un-normalized sequence score
+print(mlm_model.sequence_score(stimuli, reduction = lambda x: -x.sum(0).item(), PLL_metric='within_word_l2r'))
+'''
+[32.77983617782593]
+'''
+
+# original metric, for comparison:
+print(mlm_model.sequence_score(stimuli, reduction = lambda x: -x.sum(0).item(), PLL_metric='original'))
+'''
+[18.014726161956787]
+'''
+
+print(mlm_model.token_score(stimuli, PLL_metric='within_word_l2r'))
+'''
+[[('the', -0.07324600219726562), ('traveler', -9.668401718139648), ('lost', -6.955361366271973),
+('the', -1.1923179626464844), ('so', -7.776356220245361), ('##uven', -6.989711761474609),
+('##ir', -0.037807464599609375), ('.', -0.08663368225097656)]]
+'''
+
+# original values, for comparison (notice the 'souvenir' tokens):
+
+print(mlm_model.token_score(stimuli, PLL_metric='original'))
+'''
+[[('the', -0.07324600219726562), ('traveler', -9.668402671813965), ('lost', -6.955359935760498), ('the', -1.192317008972168), ('so', -3.0517578125e-05), ('##uven', -0.0009250640869140625), ('##ir', -0.03780937194824219), ('.', -0.08663558959960938)]]
+'''
+```
+
 ## Tutorials
 
 - [Introduction to using LM-scoring methods using minicons](https://kanishka.xyz/post/minicons-running-large-scale-behavioral-analyses-on-transformer-lms/)
@@ -102,6 +141,7 @@ print(s2s_model.sequence_score(stimuli, source_format = 'copy'))
 ## Recent Updates
 - **November 6, 2021:** MLM scoring has been fixed! You can now use `model.token_score()` and `model.sequence_score()` with `MaskedLMScorers` as well!
 - **June 4, 2022:** Added support for Seq2seq models. Thanks to [Aaron Mueller](https://github.com/aaronmueller) 🥳
+- **June 13, 2023:** Added support for `within_word_l2r`, a better way to do MLM scoring, thanks to Carina Kauf (https://github.com/carina-kauf) 🥳
 
 ## Citation
 
@@ -113,5 +153,16 @@ If you use `minicons`, please cite the following paper:
     author={Kanishka Misra},
     journal={arXiv preprint arXiv:2203.13112},
     year={2022}
+}
+```
+
+If you use Kauf and Ivanova's PLL scoring technique, please additionally also cite the following paper:
+
+```tex
+@inproceedings{kauf2023better,
+  title={A Better Way to Do Masked Language Model Scoring},
+  author={Kauf, Carina and Ivanova, Anna},
+  booktitle={Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)},
+  year={2023}
 }
 ```
