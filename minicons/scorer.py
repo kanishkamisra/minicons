@@ -434,7 +434,7 @@ class MaskedLMScorer(LMScorer):
 
         return masked_logprobs
 
-    def prepare_text(self, text: Union[str, List[str]]) -> Iterable[Any]:
+    def prepare_text(self, text: Union[str, List[str]], PLL_metric: Optional[str] = "original") -> Iterable[Any]:
         """
         Prepares a batch of input text into a format fit to run MLM
         scoring on.
@@ -444,6 +444,10 @@ class MaskedLMScorer(LMScorer):
         https://github.com/simonepri/lm-scorer
 
         :param text: batch of sentences to be prepared for scoring.
+        :param PLL_metric: PLL scoring strategy to be used.
+            Options: `original` or `within_word_l2r`. Default: `original`
+            For motivation as to why to use `within_word_l2r` PLL scoring, see Kauf & Ivanova (2023):
+            https://arxiv.org/abs/2305.10588
 
         :return: Batch of formatted input that can be passed to `logprob`
         """
@@ -460,8 +464,9 @@ class MaskedLMScorer(LMScorer):
 
         masked_tensors = []  # token ids, attention masks, lengths
 
-        for token_ids, attention_mask in zip(token_idx, attention_masks):
+        for ind, (token_ids, attention_mask) in enumerate(zip(token_idx, attention_masks)):
             token_ids = torch.tensor(token_ids)
+            word_ids = encoded.word_ids(batch_index=ind)
             # final_lengths = len(token_ids) - 2
             attention_mask = torch.tensor(attention_mask)
 
@@ -477,8 +482,23 @@ class MaskedLMScorer(LMScorer):
             ]
             effective_length = len(effective_token_ids)
 
-            mask_indices = []
-            mask_indices = [[mask_pos] for mask_pos in range(effective_length + 2)]
+            assert PLL_metric in ["original", "within_word_l2r"], "PLL metric not supported"
+            if PLL_metric == "within_word_l2r":
+                """
+                Future tokens belonging to the same word as the target token are masked during token inference as well.
+                """
+                mask_indices = [
+                    [mask_pos] + [
+                        j for j in range(mask_pos + 1, effective_length + 2)
+                        if word_ids[j] == word_ids[mask_pos]
+                    ]
+                    if word_ids[mask_pos] is not None
+                    else [mask_pos]
+                    for mask_pos in range(effective_length + 2)
+                ]
+
+            else: # Original PLL metric
+                mask_indices = [[mask_pos] for mask_pos in range(effective_length + 2)]
 
             # We don't mask the [CLS], [SEP] for now for PLL
             mask_indices = mask_indices[1:-1]
@@ -824,12 +844,12 @@ class MaskedLMScorer(LMScorer):
             return scores
 
     def sequence_score(
-        self, batch, reduction=lambda x: x.mean(0).item(), base_two=False
+        self, batch, reduction=lambda x: x.mean(0).item(), base_two=False, PLL_metric="original"
     ):
         """
         TODO: reduction should be a string, if it's a function, specify what kind of function. --> how to ensure it is always that type?
         """
-        tokenized = self.prepare_text(batch)
+        tokenized = self.prepare_text(batch, PLL_metric=PLL_metric)
         scores = self.compute_stats(
             tokenized, rank=False, base_two=base_two, return_tensors=True
         )
@@ -843,6 +863,7 @@ class MaskedLMScorer(LMScorer):
         prob: bool = False,
         base_two: bool = False,
         rank: bool = False,
+        PLL_metric: str = "original"
     ) -> Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]:
         """
         For every input sentence, returns a list of tuples in the following format:
@@ -855,6 +876,10 @@ class MaskedLMScorer(LMScorer):
         :param ``bool`` prob: If `True`, returns per-word probabilities instead of log-probabilities.
         :param ``bool`` base_two: If `True`, uses log base 2 instead of natural-log (returns bits of values in case of surprisals)
         :param ``bool`` rank: If `True`, also returns the rank of each word in context (based on the log-probability value)
+        :param ``str`` PLL_metric: PLL scoring strategy to be used.
+            Options: `original` or `within_word_l2r`. Default: `original`
+            For motivation as to why to use `within_word_l2r` PLL scoring, see Kauf & Ivanova (2023):
+            https://arxiv.org/abs/2305.10588
 
         :return: A `List` containing a `Tuple` consisting of the word, its associated score, and optionally, its rank.
         :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
@@ -866,7 +891,7 @@ class MaskedLMScorer(LMScorer):
             base_two and prob
         ), "cannot both use base (which is for a log), and a probability measure at the same time!"
 
-        tokenized = self.prepare_text(batch)
+        tokenized = self.prepare_text(batch, PLL_metric=PLL_metric)
         if rank:
             scores, ranks = self.compute_stats(
                 tokenized, rank=rank, prob=prob, base_two=base_two, return_tensors=True
