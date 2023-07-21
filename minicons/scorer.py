@@ -12,6 +12,7 @@ from transformers import (
     AutoModelForMaskedLM,
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
+    BatchEncoding,
 )
 from transformers.utils.logging import set_verbosity_error
 
@@ -26,17 +27,22 @@ class LMScorer:
     with methods to facilitate the analysis of language model output scores.
     """
 
-    def __init__(self, model_name: str, device: Optional[str] = "cpu") -> None:
+    def __init__(self, model, device: Optional[str] = "cpu", tokenizer=None) -> None:
         """
-        :param model_name: name of the model, should either be a path
-            to a model (.pt or .bin file) stored locally, or a
-            pretrained model stored on the Huggingface Model Hub.
-        :type model_name: str
+        :param model: should be path to a model (.pt or .bin file) stored
+            locally, or name of a pretrained model stored on the Huggingface
+            Model Hub, or a model (torch.nn.Module).
         :param device: device type that the model should be loaded on,
             options: `cpu or cuda:{0, 1, ...}`
         :type device: str, optional
+        :param tokenizer: if provided, use this tokenizer.
         """
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+        if tokenizer is not None:
+            self.tokenizer = tokenizer
+        elif isinstance(model, str):
+            self.tokenizer = AutoTokenizer.from_pretrained(model, use_fast=True)
+        else:
+            raise Exception("Must provide either model name or tokenizer.")
         self.device = device
         self.vocab = defaultdict(list)
         # {self.vocab[x.strip()].append(i) for x, i in [(self.tokenizer.decode([i]), i) for i in range(self.tokenizer.vocab_size)]}
@@ -103,7 +109,7 @@ class LMScorer:
     ) -> Union[Union[float, int], List[Union[float, int]]]:
         raise NotImplementedError
 
-    def prepare_text(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
+    def prepare_text(self, text: Union[str, List[str], BatchEncoding]) -> Any:
         raise NotImplementedError
 
     def prime_text(
@@ -244,7 +250,7 @@ class LMScorer:
         text: Union[str, List[str]],
         manual_special: bool = True,
         return_tensors: Optional[str] = "pt",
-    ) -> Dict:
+    ) -> BatchEncoding:
         """
         Encode a batch of sentences using the model's tokenizer.
         Equivalent of calling `model.tokenizer(input)`
@@ -258,7 +264,7 @@ class LMScorer:
         :type manual_special: str
 
         :return: Encoded batch
-        :rtype: ``Dict``
+        :rtype: ``BatchEncoding``
         """
         sentences = [text] if isinstance(text, str) else text
 
@@ -302,31 +308,33 @@ class MaskedLMScorer(LMScorer):
     """
     Class for Masked Langauge Models such as BERT, RoBERTa, etc.
 
-    :param model_name: name of the model, should either be a path
-        to a model (.pt or .bin file) stored locally, or a
-        pretrained model stored on the Huggingface Model Hub.
-    :type model_name: str
+    :param model: should be path to a model (.pt or .bin file) stored locally,
+        or name of a pretrained model stored on the Huggingface Model Hub, or
+        a model (torch.nn.Module).
     :param device: device type that the model should be loaded on,
         options: `cpu or cuda:{0, 1, ...}`
     :type device: str, optional
+    :param tokenizer: if provided, use this tokenizer.
     """
 
-    def __init__(self, model_name: str, device: Optional[str] = "cpu") -> None:
+    def __init__(self, model, device: Optional[str] = "cpu", tokenizer=None) -> None:
         """
-        :param model_name: name of the model, should either be a path
-            to a model (.pt or .bin file) stored locally, or a
-            pretrained model stored on the Huggingface Model Hub.
-
-        :type model_name: str
+        :param model: should be path to a model (.pt or .bin file) stored
+            locally, or name of a pretrained model stored on the Huggingface
+            Model Hub, or a model (torch.nn.Module).
         :param device: device type that the model should be loaded on,
             options: `cpu or cuda:{0, 1, ...}`
         :type device: str, optional
+        :param tokenizer: if provided, use this tokenizer.
         """
-        super(MaskedLMScorer, self).__init__(model_name, device)
+        super(MaskedLMScorer, self).__init__(model, device=device, tokenizer=tokenizer)
 
-        self.model = AutoModelForMaskedLM.from_pretrained(model_name, return_dict=True)
-        self.model.to(self.device)
-        self.model.eval()
+        if isinstance(model, str):
+            self.model = AutoModelForMaskedLM.from_pretrained(model, return_dict=True)
+            self.model.to(self.device)
+            self.model.eval()
+        else:
+            self.model = model
 
         # define CLS and SEP tokens
         self.bos_token_id = self.tokenizer.cls_token_id
@@ -434,7 +442,7 @@ class MaskedLMScorer(LMScorer):
 
         return masked_logprobs
 
-    def prepare_text(self, text: Union[str, List[str]], PLL_metric: Optional[str] = "original") -> Iterable[Any]:
+    def prepare_text(self, text: Union[str, List[str], BatchEncoding], PLL_metric: Optional[str] = "original") -> Iterable[Any]:
         """
         Prepares a batch of input text into a format fit to run MLM
         scoring on.
@@ -452,12 +460,15 @@ class MaskedLMScorer(LMScorer):
         :return: Batch of formatted input that can be passed to `logprob`
         """
         # converts input text to batch of tensors with every position except the cls and sep token masked
-        sentences = [text] if isinstance(text, str) else text
 
-        # idea is to tokenize and then create batches of tokenized instances,
+        if isinstance(text, BatchEncoding):
+            encoded = text
+        else:
+            sentences = [text] if isinstance(text, str) else text
+            encoded = self.encode(sentences, manual_special=False)
+
+        # idea is to create batches of tokenized instances,
         # but with each token in the sequence replaced by the mask token.
-
-        encoded = self.encode(sentences, manual_special=False)
 
         token_idx = encoded["input_ids"]
         attention_masks = encoded["attention_mask"]
@@ -466,7 +477,6 @@ class MaskedLMScorer(LMScorer):
 
         for ind, (token_ids, attention_mask) in enumerate(zip(token_idx, attention_masks)):
             token_ids = torch.tensor(token_ids)
-            word_ids = encoded.word_ids(batch_index=ind)
             # final_lengths = len(token_ids) - 2
             attention_mask = torch.tensor(attention_mask)
 
@@ -487,6 +497,7 @@ class MaskedLMScorer(LMScorer):
                 """
                 Future tokens belonging to the same word as the target token are masked during token inference as well.
                 """
+                word_ids = encoded.word_ids(batch_index=ind)  # only used for this PLL_metric
                 mask_indices = [
                     [mask_pos] + [
                         j for j in range(mask_pos + 1, effective_length + 2)
@@ -933,43 +944,50 @@ class IncrementalLMScorer(LMScorer):
     """
     Class for Autoregressive or Incremental (or left-to-right) language models such as GPT2, etc.
 
-    :param model_name: name of the model, should either be a path
-        to a model (.pt or .bin file) stored locally, or a
-        pretrained model stored on the Huggingface Model Hub.
-    :type model_name: str
+    :param model: should be path to a model (.pt or .bin file) stored locally,
+        or name of a pretrained model stored on the Huggingface Model Hub, or
+        a model (torch.nn.Module).
     :param device: device type that the model should be loaded on,
         options: `cpu or cuda:{0, 1, ...}`
     :type device: str, optional
+    :param tokenizer: if provided, use this tokenizer.
     """
 
-    def __init__(self, model_name: str, device: Optional[str] = "cpu") -> None:
+    def __init__(self, model, device: Optional[str] = "cpu", tokenizer=None) -> None:
         """
-        :param model_name: name of the model, should either be a path
-            to a model (.pt or .bin file) stored locally, or a
-            pretrained model stored on the Huggingface Model Hub.
-
-        :type model_name: str
+        :param model: should be path to a model (.pt or .bin file) stored
+            locally, or name of a pretrained model stored on the Huggingface
+            Model Hub, or a model (torch.nn.Module).
         :param device: device type that the model should be loaded on,
             options: `cpu or cuda:{0, 1, ...}`
         :type device: str, optional
+        :param tokenizer: if provided, use this tokenizer.
         """
-        super(IncrementalLMScorer, self).__init__(model_name, device)
+        super(IncrementalLMScorer, self).__init__(model, device=device, tokenizer=tokenizer)
 
-        self.model = AutoModelForCausalLM.from_pretrained(model_name, return_dict=True)
+        if isinstance(model, str):
+            self.model = AutoModelForCausalLM.from_pretrained(model, return_dict=True)
+        else:
+            self.model = model
 
-        # define CLS and SEP tokens
-        if self.tokenizer.pad_token is None:
-            if self.tokenizer.eos_token is not None:
-                self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-            else:
-                self.tokenizer.add_special_tokens(
-                    {"additional_special_tokens": ["<|pad|>"]}
-                )
-                self.tokenizer.pad_token = "<|pad|>"
-                self.model.resize_token_embeddings(len(self.tokenizer))
+        if tokenizer is None:
+            # define CLS and SEP tokens
+            if self.tokenizer.pad_token is None:
+                if self.tokenizer.eos_token is not None:
+                    self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+                else:
+                    self.tokenizer.add_special_tokens(
+                        {"additional_special_tokens": ["<|pad|>"]}
+                    )
+                    self.tokenizer.pad_token = "<|pad|>"
+                    self.model.resize_token_embeddings(len(self.tokenizer))
+        else:
+            # TODO: check if the user-given tokenizer satisfies the conditions
+            pass
 
-        self.model.to(self.device)
-        self.model.eval()
+        if isinstance(model, str):
+            self.model.to(self.device)
+            self.model.eval()
 
         self.padding_side = self.tokenizer.padding_side
 
@@ -1012,7 +1030,7 @@ class IncrementalLMScorer(LMScorer):
         text: Union[str, List[str]],
         bos_token: bool = False,
         eos_token: bool = False,
-    ) -> dict:
+    ) -> BatchEncoding:
         def _format(self, text, bos, eos):
             if bos:
                 text = self.tokenizer.bos_token + text
@@ -1026,7 +1044,7 @@ class IncrementalLMScorer(LMScorer):
 
     def prepare_text(
         self,
-        text: Union[str, List[str]],
+        text: Union[str, List[str], BatchEncoding],
         bos_token: bool = False,
         eos_token: bool = False,
     ) -> Tuple:
@@ -1039,7 +1057,10 @@ class IncrementalLMScorer(LMScorer):
         :return: Batch of formatted input that can be passed to
             ``compute_stats``
         """
-        encoded = self.encode(text, bos_token, eos_token)
+        if isinstance(text, BatchEncoding):
+            encoded = text
+        else:
+            encoded = self.encode(text, bos_token, eos_token)
         offsets = [0] * len(encoded["input_ids"])
         return encoded, offsets
 
@@ -1502,46 +1523,54 @@ class Seq2SeqScorer(LMScorer):
     """
     Class for Autoregressive or Incremental (or left-to-right) language models such as GPT2, etc.
 
-    :param model_name: name of the model, should either be a path
-        to a model (.pt or .bin file) stored locally, or a
-        pretrained model stored on the Huggingface Model Hub.
-    :type model_name: str
+    :param model: should be path to a model (.pt or .bin file) stored locally,
+        or name of a pretrained model stored on the Huggingface Model Hub, or
+        a model (torch.nn.Module).
     :param device: device type that the model should be loaded on,
         options: `cpu or cuda:{0, 1, ...}`
     :type device: str, optional
+    :param tokenizer: if provided, use this tokenizer.
     """
 
-    def __init__(self, model_name: str, device: Optional[str] = "cpu") -> None:
+    def __init__(self, model, device: Optional[str] = "cpu", tokenizer=None) -> None:
         """
-        :param model_name: name of the model, should either be a path
-            to a model (.pt or .bin file) stored locally, or a
-            pretrained model stored on the Huggingface Model Hub.
-
-        :type model_name: str
+        :param model: should be path to a model (.pt or .bin file) stored
+            locally, or name of a pretrained model stored on the Huggingface
+            Model Hub, or a model (torch.nn.Module).
         :param device: device type that the model should be loaded on,
             options: `cpu or cuda:{0, 1, ...}`
         :type device: str, optional
+        :param tokenizer: if provided, use this tokenizer.
         """
-        super(Seq2SeqScorer, self).__init__(model_name, device)
+        super(Seq2SeqScorer, self).__init__(model, device=device, tokenizer=tokenizer)
 
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name, return_dict=True)
+        if isinstance(model, str):
+            self.model = AutoModelForSeq2SeqLM.from_pretrained(model, return_dict=True)
+        else:
+            self.model = model
 
-        # define CLS and SEP tokens
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.add_special_tokens(
-                {"additional_special_tokens": ["<|pad|>"]}
-            )
-            self.tokenizer.pad_token = "<|pad|>"
+        if tokenizer is None:
+            # define CLS and SEP tokens
+            if self.tokenizer.pad_token is None:
+                self.tokenizer.add_special_tokens(
+                    {"additional_special_tokens": ["<|pad|>"]}
+                )
+                self.tokenizer.pad_token = "<|pad|>"
 
-        if self.tokenizer.bos_token is None:
-            self.tokenizer.add_special_tokens(
-                {"additional_special_tokens": ["<|bos|>"]}
-            )
-            self.tokenizer.bos_token = "<|bos|>"
+            if self.tokenizer.bos_token is None:
+                self.tokenizer.add_special_tokens(
+                    {"additional_special_tokens": ["<|bos|>"]}
+                )
+                self.tokenizer.bos_token = "<|bos|>"
 
-        self.model.resize_token_embeddings(len(self.tokenizer))
-        self.model.to(self.device)
-        self.model.eval()
+        else:
+            # TODO: check if the user-given tokenizer satisfies the conditions
+            pass
+
+        if isinstance(model, str):
+            self.model.resize_token_embeddings(len(self.tokenizer))
+            self.model.to(self.device)
+            self.model.eval()
 
     def add_special_tokens(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
         """
@@ -1560,11 +1589,11 @@ class Seq2SeqScorer(LMScorer):
 
         return sentences
 
-    def encode(self, text: Union[str, List[str]]) -> dict:
+    def encode(self, text: Union[str, List[str]]) -> BatchEncoding:
         text = [text] if isinstance(text, str) else text
         return self.tokenizer(text, return_tensors="pt", padding=True)
 
-    def prepare_text(self, text: Union[str, List[str]]) -> Tuple:
+    def prepare_text(self, text: Union[str, List[str], BatchEncoding]) -> Tuple:
         """
         Prepares a batch of input text into a format fit to run LM
         scoring on.
@@ -1574,7 +1603,10 @@ class Seq2SeqScorer(LMScorer):
         :return: Batch of formatted input that can be passed to
             ``compute_stats``
         """
-        encoded = self.encode(text)
+        if isinstance(text, BatchEncoding):
+            encoded = text
+        else:
+            encoded = self.encode(text)
         offsets = [0] * len(encoded["input_ids"])
         return encoded, offsets
 
