@@ -26,6 +26,15 @@ Incremental/Autoregressive models can be instantiated using:
 # Warning: This will download a 550mb model file if you do not already have it!
 model = scorer.IncrementalLMScorer('gpt2', 'cpu')
 ```
+or equivalently, using a manually constructed model:
+```py
+from transformers import AutoModelForCausalLM
+
+gpt2 = AutoModelForCausalLM.from_pretrained('gpt2', return_dict=True)
+gpt2_tokenizer = AutoTokenizer.from_pretrained('gpt2', use_fast=True)
+model = scorer.IncrementalLMScorer(gpt2, tokenizer=gpt2_tokenizer, device='cpu')
+```
+(You may customize the model and the tokenizer here.)
 
 `minicons` allows you to compute token-by-token log-probabilities using the `model.compute_stats()` function, which accepts texts encoded by the `model.prepare_text()` function. It has the following parameters:
 
@@ -167,3 +176,13 @@ model.partial_score(prefixes, queries) # we will use the default reduction metho
 
 # [-4.762691497802734, -4.574714660644531]
 ```
+
+## Sidenote: Passing BatchEncoding to the methods
+
+Sometimes, you already have `BatchEncoding` that is the result encoded by the
+tokenizer (same as what you get by calling `model.encode(stimuli)`). In this
+case, you can also pass the `BatchEncoding` instance in place of the `stimuli`.
+For example, `model.sequence_score(model.encode(stimuli), reduction = reduction)`
+is equivalent to `model.sequence_score(stimuli, reduction = reduction)`. This
+could be useful if you want to save the repetition of tokenization time or if
+you want to use customized token sequences.
