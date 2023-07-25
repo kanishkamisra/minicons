@@ -27,11 +27,13 @@ class LMScorer:
     with methods to facilitate the analysis of language model output scores.
     """
 
-    def __init__(self, model, device: Optional[str] = "cpu", tokenizer=None) -> None:
+    def __init__(self, model: Union[str, torch.nn.Module], device: Optional[str] = "cpu", tokenizer=None) -> None:
         """
         :param model: should be path to a model (.pt or .bin file) stored
             locally, or name of a pretrained model stored on the Huggingface
-            Model Hub, or a model (torch.nn.Module).
+            Model Hub, or a model (torch.nn.Module) that have the same
+            signature as the corresponding Huggingface model (see the subclass
+            for details).
         :param device: device type that the model should be loaded on,
             options: `cpu or cuda:{0, 1, ...}`
         :type device: str, optional
@@ -310,18 +312,23 @@ class MaskedLMScorer(LMScorer):
 
     :param model: should be path to a model (.pt or .bin file) stored locally,
         or name of a pretrained model stored on the Huggingface Model Hub, or
-        a model (torch.nn.Module).
+        a model (torch.nn.Module) that have the same signature as a
+        Huggingface model obtained from `AutoModelForMaskedLM`. In the last
+        case, a corresponding tokenizer must also be provided.
     :param device: device type that the model should be loaded on,
         options: `cpu or cuda:{0, 1, ...}`
     :type device: str, optional
     :param tokenizer: if provided, use this tokenizer.
     """
 
-    def __init__(self, model, device: Optional[str] = "cpu", tokenizer=None) -> None:
+    def __init__(self, model: Union[str, torch.nn.Module], device: Optional[str] = "cpu", tokenizer=None) -> None:
         """
         :param model: should be path to a model (.pt or .bin file) stored
             locally, or name of a pretrained model stored on the Huggingface
-            Model Hub, or a model (torch.nn.Module).
+            Model Hub, or a model (torch.nn.Module) that have the same
+            signature as a Huggingface model obtained from
+            `AutoModelForMaskedLM`. In the last case, a corresponding tokenizer
+            must also be provided.
         :param device: device type that the model should be loaded on,
             options: `cpu or cuda:{0, 1, ...}`
         :type device: str, optional
@@ -946,18 +953,23 @@ class IncrementalLMScorer(LMScorer):
 
     :param model: should be path to a model (.pt or .bin file) stored locally,
         or name of a pretrained model stored on the Huggingface Model Hub, or
-        a model (torch.nn.Module).
+        a model (torch.nn.Module) that have the same signature as a
+        Huggingface model obtained from `AutoModelForCausalLM`. In the last
+        case, a corresponding tokenizer must also be provided.
     :param device: device type that the model should be loaded on,
         options: `cpu or cuda:{0, 1, ...}`
     :type device: str, optional
     :param tokenizer: if provided, use this tokenizer.
     """
 
-    def __init__(self, model, device: Optional[str] = "cpu", tokenizer=None) -> None:
+    def __init__(self, model: Union[str, torch.nn.Module], device: Optional[str] = "cpu", tokenizer=None) -> None:
         """
         :param model: should be path to a model (.pt or .bin file) stored
             locally, or name of a pretrained model stored on the Huggingface
-            Model Hub, or a model (torch.nn.Module).
+            Model Hub, or a model (torch.nn.Module) that have the same
+            signature as a Huggingface model obtained from
+            `AutoModelForCausalLM`. In the last case, a corresponding tokenizer
+            must also be provided.
         :param device: device type that the model should be loaded on,
             options: `cpu or cuda:{0, 1, ...}`
         :type device: str, optional
@@ -970,20 +982,18 @@ class IncrementalLMScorer(LMScorer):
         else:
             self.model = model
 
-        if tokenizer is None:
-            # define CLS and SEP tokens
-            if self.tokenizer.pad_token is None:
-                if self.tokenizer.eos_token is not None:
-                    self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-                else:
-                    self.tokenizer.add_special_tokens(
-                        {"additional_special_tokens": ["<|pad|>"]}
-                    )
-                    self.tokenizer.pad_token = "<|pad|>"
-                    self.model.resize_token_embeddings(len(self.tokenizer))
-        else:
-            # TODO: check if the user-given tokenizer satisfies the conditions
-            pass
+        # define CLS and SEP tokens
+        if self.tokenizer.pad_token is None:
+            if tokenizer is not None:
+                warnings.warn("tokenizer is changed by adding pad_token_id to the tokenizer.")
+            if self.tokenizer.eos_token is not None:
+                self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+            else:
+                self.tokenizer.add_special_tokens(
+                    {"additional_special_tokens": ["<|pad|>"]}
+                )
+                self.tokenizer.pad_token = "<|pad|>"
+                self.model.resize_token_embeddings(len(self.tokenizer))
 
         if isinstance(model, str):
             self.model.to(self.device)
@@ -1525,18 +1535,23 @@ class Seq2SeqScorer(LMScorer):
 
     :param model: should be path to a model (.pt or .bin file) stored locally,
         or name of a pretrained model stored on the Huggingface Model Hub, or
-        a model (torch.nn.Module).
+        a model (torch.nn.Module) that have the same signature as a
+        Huggingface model obtained from `AutoModelForSeq2SeqLM`. In the last
+        case, a corresponding tokenizer must also be provided.
     :param device: device type that the model should be loaded on,
         options: `cpu or cuda:{0, 1, ...}`
     :type device: str, optional
     :param tokenizer: if provided, use this tokenizer.
     """
 
-    def __init__(self, model, device: Optional[str] = "cpu", tokenizer=None) -> None:
+    def __init__(self, model: Union[str, torch.nn.Module], device: Optional[str] = "cpu", tokenizer=None) -> None:
         """
         :param model: should be path to a model (.pt or .bin file) stored
             locally, or name of a pretrained model stored on the Huggingface
-            Model Hub, or a model (torch.nn.Module).
+            Model Hub, or a model (torch.nn.Module) that have the same
+            signature as a Huggingface model obtained from
+            `AutoModelForSeq2SeqLM`. In the last case, a corresponding
+            tokenizer must also be provided.
         :param device: device type that the model should be loaded on,
             options: `cpu or cuda:{0, 1, ...}`
         :type device: str, optional
@@ -1549,23 +1564,22 @@ class Seq2SeqScorer(LMScorer):
         else:
             self.model = model
 
-        if tokenizer is None:
-            # define CLS and SEP tokens
-            if self.tokenizer.pad_token is None:
-                self.tokenizer.add_special_tokens(
-                    {"additional_special_tokens": ["<|pad|>"]}
-                )
-                self.tokenizer.pad_token = "<|pad|>"
+        # define CLS and SEP tokens
+        if self.tokenizer.pad_token is None:
+            if tokenizer is not None:
+                warnings.warn("tokenizer is changed by adding pad_token to the tokenizer.")
+            self.tokenizer.add_special_tokens(
+                {"additional_special_tokens": ["<|pad|>"]}
+            )
+            self.tokenizer.pad_token = "<|pad|>"
 
-            if self.tokenizer.bos_token is None:
-                self.tokenizer.add_special_tokens(
-                    {"additional_special_tokens": ["<|bos|>"]}
-                )
-                self.tokenizer.bos_token = "<|bos|>"
-
-        else:
-            # TODO: check if the user-given tokenizer satisfies the conditions
-            pass
+        if self.tokenizer.bos_token is None:
+            if tokenizer is not None:
+                warnings.warn("tokenizer is changed by adding bos_token to the tokenizer.")
+            self.tokenizer.add_special_tokens(
+                {"additional_special_tokens": ["<|bos|>"]}
+            )
+            self.tokenizer.bos_token = "<|bos|>"
 
         if isinstance(model, str):
             self.model.resize_token_embeddings(len(self.tokenizer))
