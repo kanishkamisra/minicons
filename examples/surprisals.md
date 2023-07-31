@@ -45,7 +45,7 @@ base_two [bool]: Use base 2 for the log-prob
 return_tensors [bool]: Whether the output should contain tensors.
 ```
 
-Each value here represents the conditional probability -- P(word | left context), so the first value represents the probability of the second word given the first.
+Each value here represents the conditional log-probability -- log P(word | left context), so the first value represents the probability of the second word given the first.
 
 ```py
 logprobs = model.compute_stats(model.prepare_text("The sketch of those trucks hasn't"))
