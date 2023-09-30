@@ -132,6 +132,39 @@ print(mlm_model.token_score(stimuli, PLL_metric='original'))
 '''
 ```
 
+## OpenAI API
+Some models on the OpenAI API also allow for querying of log-probs (for now), and minicons now (as of Sept 29) also supports it! Here's how:
+
+First, make sure you save your OpenAI API Key in some file (say `~/.openaikey`). Register the key using:
+```py
+from minicons import openai as mo
+
+PATH = "/path/to/apikey"
+mo.register_api_key(PATH)
+```
+Then,
+
+```py
+from minicons import openai as mo
+
+stimuli = ["the keys to the cabinet are", "the keys to the cabinet is"]
+
+# we want to test if p(are | prefix) > p(is | prefix)
+model = "gpt-3.5-turbo-instruct"
+query = mo.OpenAIQuery(model, stimuli)
+
+# run query using the above batch
+query.query()
+
+# get conditional log-probs for are and is given prior context:
+query.conditional_score(["are", "is"])
+
+#> [-2.5472614765167236, -5.633198261260986] SUCCESS!
+
+# NOTE: this will not be 100% reproducible since it seems OpenAI adds a little noise to its outputs.
+# see https://twitter.com/xuanalogue/status/1653280462935146496
+```
+
 ## Tutorials
 
 - [Introduction to using LM-scoring methods using minicons](https://kanishka.xyz/post/minicons-running-large-scale-behavioral-analyses-on-transformer-lms/)

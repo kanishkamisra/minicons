@@ -22,6 +22,11 @@ def get_batch(data: list, batch_size: int, shuffle: bool = False):
         batch = data[sindex:]
         yield batch
 
+def between(num, tup):
+    if num >= tup[0] and num < tup[1]:
+        return True
+    else:
+        return False
 
 def character_span(sentence, word):
     assert word in sentence
