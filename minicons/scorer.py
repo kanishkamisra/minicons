@@ -1234,10 +1234,7 @@ class IncrementalLMScorer(LMScorer):
 
         for logit, idx, offset in zip(logits, effective_ids, offsets):
             length = len(idx)
-            if idx[-1] == self.tokenizer.eos_token_id:
-                logit = logit.squeeze(0)[torch.arange(offset, length),]
-            else:
-                logit = logit.squeeze(0)[:, :-1][torch.arange(offset, length),]
+            logit = logit.squeeze(0)[torch.arange(offset, length),]
 
             logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
             query_ids = idx[offset:]
