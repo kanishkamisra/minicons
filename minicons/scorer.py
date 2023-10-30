@@ -990,10 +990,13 @@ class IncrementalLMScorer(LMScorer):
                 self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
             else:
                 self.tokenizer.add_special_tokens(
-                    {"additional_special_tokens": ["<|pad|>"]}
+                    {"additional_special_tokens": ["<pad>"]}
                 )
-                self.tokenizer.pad_token = "<|pad|>"
+                self.tokenizer.pad_token = "<pad>"
                 self.model.resize_token_embeddings(len(self.tokenizer))
+
+        if self.tokenizer.padding_side == "left":
+            self.tokenizer.padding_side = "right"
 
         if isinstance(model, str):
             self.model.to(self.device)
