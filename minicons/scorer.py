@@ -1,5 +1,5 @@
 """Utilities for scoring sequences using Language Models."""
-from typing import Iterable, Union, List, Dict, Optional, Callable, Tuple, Any
+from typing import Iterable, Union, List, Collection, Optional, Callable, Tuple, Any, cast
 
 import torch
 import warnings
@@ -53,7 +53,7 @@ class LMScorer:
             for x, j in decoded:
                 self.vocab[x.strip()].append(j)
 
-    def add_special_tokens(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
+    def add_special_tokens(self, text: Union[str, Iterable[str]]) -> List[str]:
         raise NotImplementedError
 
     def distribution(self, batch: Iterable) -> torch.Tensor:
@@ -108,7 +108,7 @@ class LMScorer:
 
     def compute_stats(
         self, batch: Iterable, rank: bool = False
-    ) -> Union[Union[float, int], List[Union[float, int]]]:
+    ) -> Union[Tuple[List[float], List[int]], List[float], torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         raise NotImplementedError
 
     def prepare_text(self, text: Union[str, List[str], BatchEncoding]) -> Any:
@@ -208,16 +208,16 @@ class LMScorer:
         prefix: Union[str, List[str]],
         stimuli: Union[str, List[str]],
         reduction: Callable = lambda x: x.mean(0).item(),
-        bos_token=False,
-        eos_token=False,
-        **kwargs,
+        prob: bool = False,
+        base_two: bool = False,
+        **kw,
     ) -> List[float]:
         """
         Pooled estimates of sequence log probabilities (or some modification of it), given a prefix. Pooling is usually done using a function that is passed to the method.
 
         :param prefix: a batch of prefixes or primes passed to the
             language model. This is what the sequence is conditioned on, and the model ignores the word probabilities of this part of the input in estimating the overall score.
-        :type preamble: ``Union[str, List[str]]``
+        :type prefix: ``Union[str, List[str]]``
         :param stimuli: a batch of sequences (same length as prefix)
             that form the main input consisting of the sequence whose
             score you want to calculate.
@@ -225,28 +225,49 @@ class LMScorer:
         :param reduction: Reduction function, is selected to be
             ``lambda x: x.mean(0).item()`` by default, which stands for the avg. log-probability per token for each sequence in the batch.
         :type reduction: Callable
-        :param kwargs: parameters for the ``compute_stats`` call --
-
-            * `prob` (`bool`): Whether the returned value should be a probability (note that the default reduction method will have to be changed to `lambda x: x.prod(0).item()` to get a meaningful return value)
-
-            * `base_two` (`bool`): whether the returned value should be in base 2 (only works when `prob = False`)
-
-            * `surprisal` (`bool`): whether the returned value should be a surprisal (does not work when `prob = True`)
-
-
+        :param kw: model-specific keyword arguments to pass to the `prepare_text` function 
         :return: List of floats specifying the desired score for the stimuli part of the input, e.g., P(stimuli | preamble).
         :rtype: ``List[float]``
         """
-        if bos_token or eos_token:
-            primed = self.prime_text(prefix, stimuli, bos_token, eos_token)
-        else:
-            primed = self.prime_text(prefix, stimuli)
-        result = self.compute_stats(primed, return_tensors=True, **kwargs)
+        primed = self.prime_text(prefix, stimuli, **kw)
+        
+        result = self.compute_stats(
+            primed, rank=False, base_two=base_two, prob=prob, return_tensors=True
+        )
         logprob = result
         reduced = list(map(reduction, logprob))
 
         return reduced
 
+    def sequence_score(
+        self,
+        stimuli,
+        reduction=lambda x: x.mean(0).item(),
+        prob: bool = False,
+        base_two: bool = False,
+        **kw
+    ):
+        """
+        Pooled estimates of sequence log probabilities (or some modification of it).
+
+        :param stimuli: a batch of sequences whose score you want to calculate.
+        :type stimuli: ``Union[str, List[str]]``
+        :param reduction: Reduction function, is selected to be
+            ``lambda x: x.mean(0).item()`` by default, which stands for the avg. log-probability per token for each sequence in the batch.
+        :type reduction: Callable
+        :param kw: model-specific keyword arguments to pass to the `prepare_text` function 
+        :return: List of floats specifying the desired score for the stimuli part of the input, e.g., P(stimuli | preamble).
+        :rtype: ``List[float]``
+
+        TODO: reduction should be a string, if it's a function, specify what kind of function. --> how to ensure it is always that type?
+        """
+        tokenized = self.prepare_text(stimuli, **kw)
+        scores = self.compute_stats(
+            tokenized, rank=False, base_two=base_two, prob=prob, return_tensors=True
+        )
+        reduced = list(map(reduction, scores))
+        return reduced
+    
     def encode(
         self,
         text: Union[str, List[str]],
@@ -321,7 +342,13 @@ class MaskedLMScorer(LMScorer):
     :param tokenizer: if provided, use this tokenizer.
     """
 
-    def __init__(self, model: Union[str, torch.nn.Module], device: Optional[str] = "cpu", tokenizer=None) -> None:
+    def __init__(
+        self,
+        model: Union[str, torch.nn.Module],
+        device: Optional[str] = "cpu",
+        tokenizer=None,
+        PLL_metric: str = "original",
+    ) -> None:
         """
         :param model: should be path to a model (.pt or .bin file) stored
             locally, or name of a pretrained model stored on the Huggingface
@@ -343,6 +370,7 @@ class MaskedLMScorer(LMScorer):
         else:
             self.model = model
 
+        self.PLL_metric: str = PLL_metric
         # define CLS and SEP tokens
         self.bos_token_id = self.tokenizer.cls_token_id
         self.eos_token_id = self.tokenizer.sep_token_id
@@ -351,7 +379,7 @@ class MaskedLMScorer(LMScorer):
         self.mask_token_id = self.tokenizer.mask_token_id
         self.pad_token_id = self.tokenizer.pad_token_id
 
-    def add_special_tokens(self, text: Union[str, List[str]]) -> List[str]:
+    def add_special_tokens(self, text: Union[str, Iterable[str]]) -> List[str]:
         """
         Reformats input text to add special model-dependent tokens.
 
@@ -373,7 +401,7 @@ class MaskedLMScorer(LMScorer):
 
     def mask(
         self, sentence_words: Union[Tuple[str, str], List[Tuple[str, str]]]
-    ) -> Tuple[str, str, int]:
+    ) -> Tuple[List[str], List[str]]:
         """
         Processes a list of (sentence, word) into input that has the
         word masked out of the sentence.
@@ -388,22 +416,20 @@ class MaskedLMScorer(LMScorer):
         :return: Tuple `(sentence, word, length)`
         """
         sentence_words = (
-            [sentence_words] if isinstance(sentence_words[0], str) else sentence_words
+            [sentence_words] if isinstance(sentence_words, tuple) else sentence_words
         )
-        sentences, words = list(zip(*sentence_words))
-        words = list(words)
-        length = len(words)
+        sentences: List[str] = []
+        words: List[str] = []
 
-        sentences = [
-            sub(
+        for sentence, word in sentence_words:
+            words.append(word)
+            sentences.append(sub(
                 rf"(?<![\w\/-])({word})(?=[^\w\/-])",
                 self.tokenizer.mask_token,
                 sentence,
-            )
-            for sentence, word in sentence_words
-        ]
+            ))
 
-        return (sentences, words, length)
+        return (sentences, words)
 
     def cloze(
         self, sentence_words: Union[Tuple[str, str], List[Tuple[str, str]]]
@@ -420,7 +446,7 @@ class MaskedLMScorer(LMScorer):
         :return: A tensor with log probabilities for the desired word
             in context
         """
-        sentences, words, length = self.mask(sentence_words)
+        sentences, words  = self.mask(sentence_words)
 
         encoded = self.tokenizer(sentences, return_tensors="pt")
         encoded = encoded.to(self.device)
@@ -432,7 +458,7 @@ class MaskedLMScorer(LMScorer):
         with torch.no_grad():
             masked_logits = (
                 self.model(**encoded)
-                .logits[torch.arange(length)[:, None], idx]
+                .logits[torch.arange(len(sentences))[:, None], idx]
                 .squeeze()
                 .detach()
             )
@@ -449,7 +475,84 @@ class MaskedLMScorer(LMScorer):
 
         return masked_logprobs
 
-    def prepare_text(self, text: Union[str, List[str], BatchEncoding], PLL_metric: Optional[str] = "original") -> Iterable[Any]:
+    def get_masked_tensors(
+        self,
+        encoded: BatchEncoding,
+        PLL_metric: Optional[str] = None,
+        targets_start: Optional[List[int]] = None,
+        targets_end: Optional[List[int]] = None,
+    ) -> Iterable[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
+        """Create batches of tokenized instances with each token in the sequence replaced by the mask token. """
+        if PLL_metric is None:
+            PLL_metric = self.PLL_metric
+
+        for batch_index, (token_ids, attention_mask) in enumerate(zip(encoded["input_ids"] , encoded["attention_mask"])):
+            token_ids = torch.tensor(token_ids)
+            attention_mask = torch.tensor(attention_mask)
+
+            target_token_indices: List[int] = []
+            target_token_ids: List[torch.Tensor] = []
+
+            # select tokens (and their indices) that will be predicted
+            for token_index, token_id in enumerate(token_ids):
+                if (
+                    token_id != self.pad_token_id
+                    and token_id != self.cls_token_id
+                    and token_id != self.sep_token_id
+                    and (targets_start is None or token_index >= targets_start[batch_index])
+                    and (targets_end is None or token_index < targets_end[batch_index])
+                ):
+                    target_token_ids.append(token_id)
+                    target_token_indices.append(token_index)
+
+            target_token_indices = list(target_token_indices)
+            target_token_ids = list(target_token_ids)
+
+            # mask tokens based on the current token to be predicted
+            mask_indices: List[List[int]]
+            
+            if PLL_metric == "within_word_l2r":
+                """
+                Future tokens belonging to the same word as the target token are masked during token inference as well.
+                """
+                word_ids = encoded.word_ids(batch_index=batch_index)  # only used for this PLL_metric
+
+                mask_indices = [
+                    # mask the target token and all following tokens which belong to the same word
+                    [mask_pos] + [
+                        j for j in range(mask_pos + 1, target_token_indices[-1] + 1)
+                        if word_ids[j] == word_ids[mask_pos]
+                    ]
+                    if word_ids[mask_pos] is not None
+                    else [mask_pos]  # mask this token
+                    for mask_pos in target_token_indices
+               ]
+
+            elif PLL_metric == "original":
+                # Original PLL metric
+                mask_indices = [[target] for target in target_token_indices]
+
+            else:
+                raise ValueError(f"PLL metric '{PLL_metric}' not supported.")
+
+            # repeat the token ids and mask each set of tokens in a separate row
+            token_ids_masked = token_ids.repeat(len(target_token_indices), 1)
+
+            for i, mask_set in enumerate(mask_indices):
+                token_ids_masked[i, mask_set] = self.mask_token_id
+
+            yield (
+                # token ids with some replaced by the mask token (effective tokens are replaced, but potentially more)
+                token_ids_masked,
+                # the attention mask is identical for all masked sets
+                attention_mask.expand(len(target_token_indices), -1),
+                # ids of the tokens to be predicted
+                torch.tensor(target_token_ids),
+                # indices of the tokens to be predicted
+                torch.tensor(target_token_indices),
+            )
+
+    def prepare_text(self, text: Union[str, List[str], BatchEncoding], PLL_metric: Optional[str] = None) -> MaskedLMScorerComputeStatsFormat:
         """
         Prepares a batch of input text into a format fit to run MLM
         scoring on.
@@ -474,76 +577,12 @@ class MaskedLMScorer(LMScorer):
             sentences = [text] if isinstance(text, str) else text
             encoded = self.encode(sentences, manual_special=False)
 
-        # idea is to create batches of tokenized instances,
-        # but with each token in the sequence replaced by the mask token.
-
-        token_idx = encoded["input_ids"]
-        attention_masks = encoded["attention_mask"]
-
-        masked_tensors = []  # token ids, attention masks, lengths
-
-        for ind, (token_ids, attention_mask) in enumerate(zip(token_idx, attention_masks)):
-            token_ids = torch.tensor(token_ids)
-            # final_lengths = len(token_ids) - 2
-            attention_mask = torch.tensor(attention_mask)
-
-            token_ids_masked_list = []
-            attention_masked_list = []
-
-            effective_token_ids = [
-                token
-                for token in token_ids
-                if token != self.pad_token_id
-                and token != self.cls_token_id
-                and token != self.sep_token_id
-            ]
-            effective_length = len(effective_token_ids)
-
-            assert PLL_metric in ["original", "within_word_l2r"], "PLL metric not supported"
-            if PLL_metric == "within_word_l2r":
-                """
-                Future tokens belonging to the same word as the target token are masked during token inference as well.
-                """
-                word_ids = encoded.word_ids(batch_index=ind)  # only used for this PLL_metric
-                mask_indices = [
-                    [mask_pos] + [
-                        j for j in range(mask_pos + 1, effective_length + 2)
-                        if word_ids[j] == word_ids[mask_pos]
-                    ]
-                    if word_ids[mask_pos] is not None
-                    else [mask_pos]
-                    for mask_pos in range(effective_length + 2)
-                ]
-
-            else: # Original PLL metric
-                mask_indices = [[mask_pos] for mask_pos in range(effective_length + 2)]
-
-            # We don't mask the [CLS], [SEP] for now for PLL
-            mask_indices = mask_indices[1:-1]
-
-            mask_token_id = self.mask_token_id
-            for mask_set in mask_indices:
-                token_ids_masked = token_ids.clone()
-                token_ids_masked[mask_set] = mask_token_id
-                attention_masked = attention_mask.clone()
-
-                attention_masked_list.append(attention_masked)
-                token_ids_masked_list.append(token_ids_masked)
-            masked_tensors.append(
-                (
-                    torch.stack(token_ids_masked_list),
-                    torch.stack(attention_masked_list),
-                    effective_token_ids,
-                    len(mask_indices),
-                    1,
-                )
-            )
-
-        return masked_tensors
+    
+        return self.get_masked_tensors(encoded, PLL_metric)
 
     def prime_text(
-        self, preamble: Union[str, List[str]], stimuli: Union[str, List[str]]
-    ) -> Iterable[Any]:
+        self, preamble: Union[str, List[str]], stimuli: Union[str, List[str]], PLL_metric: Optional[str] = None
+    ) -> Iterable[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
         """
         Prepares a batch of input text into a format fit to run LM
         scoring on.
@@ -558,83 +597,28 @@ class MaskedLMScorer(LMScorer):
         :return: Batch of formatted input that can be passed to
             ``compute_stats``
         """
-        preamble_text = [preamble] if isinstance(preamble, str) else preamble
-        preamble_encoded = self.encode(preamble_text, False)["input_ids"]
-        preamble_lens = []
+        if isinstance(preamble, str):
+            assert isinstance(stimuli, str)
+            preamble = [preamble]
+            stimuli = [stimuli]
+
+        assert isinstance(stimuli, list)
+
+        # comput the length of each preamble
+        preamble_encoded = self.encode(preamble, False)["input_ids"]
+        preamble_lens: List[int] = []
+        
         for preamble_tokens in preamble_encoded:
-            preamble_lens.append(
-                len(
-                    [
-                        token
-                        for token in preamble_tokens
-                        if token != self.pad_token_id and token != self.sep_token_id
-                    ]
-                )
-            )
+            preamble_lens.append(sum(
+                token != self.pad_token_id and token != self.sep_token_id
+                for token in preamble_tokens
+            ))
 
-        sentences = (
-            [preamble + " " + stimuli]
-            if isinstance(preamble, str)
-            else [p + " " + s for p, s in list(zip(preamble, stimuli))]
-        )
-
-        # idea is to tokenize and then create batches of tokenized instances,
-        # but with each token in the sequence replaced by the mask token.
-
+        sentences = [p + " " + s for p, s in list(zip(preamble, stimuli))]
         encoded = self.encode(sentences, manual_special=False)
 
-        token_idx = encoded["input_ids"]
-        attention_masks = encoded["attention_mask"]
 
-        masked_tensors = []  # token ids, attention masks, lengths
-
-        for i, (token_ids, attention_mask) in enumerate(
-            zip(token_idx, attention_masks)
-        ):
-            token_ids = torch.tensor(token_ids)
-            # final_lengths = len(token_ids) - 2
-            attention_mask = torch.tensor(attention_mask)
-
-            token_ids_masked_list = []
-            attention_masked_list = []
-
-            effective_token_ids = [
-                token
-                for j, token in enumerate(token_ids)
-                if token != self.pad_token_id
-                and token != self.cls_token_id
-                and token != self.sep_token_id
-                and j >= preamble_lens[i]
-            ]
-            effective_length = len(effective_token_ids) + preamble_lens[i]
-
-            mask_indices = []
-            mask_indices = [
-                [mask_pos] for mask_pos in range(preamble_lens[i], effective_length + 1)
-            ]
-
-            # We don't mask the [CLS], [SEP] for now for PLL
-            mask_indices = mask_indices[:-1]
-
-            mask_token_id = self.mask_token_id
-            for mask_set in mask_indices:
-                token_ids_masked = token_ids.clone()
-                token_ids_masked[mask_set] = mask_token_id
-                attention_masked = attention_mask.clone()
-
-                attention_masked_list.append(attention_masked)
-                token_ids_masked_list.append(token_ids_masked)
-            masked_tensors.append(
-                (
-                    torch.stack(token_ids_masked_list),
-                    torch.stack(attention_masked_list),
-                    effective_token_ids,
-                    len(mask_indices),
-                    preamble_lens[i],
-                )
-            )
-
-        return masked_tensors
+        return self.get_masked_tensors(encoded, PLL_metric=PLL_metric, targets_start=preamble_lens)
 
     def distribution(self, batch: Iterable) -> torch.Tensor:
         """
@@ -668,7 +652,7 @@ class MaskedLMScorer(LMScorer):
 
         return logprob_distribution
 
-    def cloze_distribution(self, queries: Iterable) -> torch.Tensor:
+    def cloze_distribution(self, queries: Union[Collection[Tuple[str, str]], Tuple[str, str]]) -> torch.Tensor:
         """
         Accepts as input batch of [(s_i, bw_i)] where s_i is a prompt with an
         abstract token (bw_i) representing a blank word and returns a distribution
@@ -678,9 +662,14 @@ class MaskedLMScorer(LMScorer):
 
         :return: Tensor contisting of log probabilities over vocab items.
         """
+        
+        if len(queries) == 0:
+            return torch.tensor([])
+        
+        if isinstance(next(iter(queries)), str):
+            queries = [cast(Tuple[str, str], queries)]
 
-        queries = [queries] if isinstance(queries[0], str) else queries
-        prompts, words = list(zip(*queries))
+        prompts, words = zip(*queries)
 
         modified_prompts = self.add_special_tokens(prompts)
         splits = [prompt.split(word) for prompt, word in zip(modified_prompts, words)]
@@ -781,10 +770,10 @@ class MaskedLMScorer(LMScorer):
         self,
         batch: Iterable,
         rank: bool = False,
-        prob=False,
         base_two: bool = False,
+        prob: bool = False,
         return_tensors: bool = False,
-    ) -> Union[Tuple[List[float], List[float]], List[float]]:
+    ) -> Union[Tuple[List[float], List[int]], List[float], torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Primary computational method that processes a batch of prepared sentences and returns per-token scores for each sentence. By default, returns log-probabilities.
 
@@ -801,24 +790,18 @@ class MaskedLMScorer(LMScorer):
             base_two and prob
         ), "cannot both use base (which is for a log), and a probability measure at the same time!"
 
-        token_ids, attention_masks, effective_token_ids, lengths, offsets = list(
-            zip(*batch)
-        )
-        token_ids = torch.cat(token_ids)
-        attention_masks = torch.cat(attention_masks)
-        token_ids = token_ids.to(self.device)
-        attention_masks = attention_masks.to(self.device)
-        effective_token_ids = torch.cat([torch.tensor(x) for x in effective_token_ids])
+        token_ids, attention_masks, effective_token_ids, indices = zip(*batch)
+        
+        token_ids = torch.cat(token_ids).to(self.device)
+        attention_masks = torch.cat(attention_masks).to(self.device)
 
-        indices = list(
-            chain.from_iterable(
-                [list(range(o, o + n)) for n, o in zip(lengths, offsets)]
-            )
-        )
+        lengths = [len(inds) for inds in indices]
 
         with torch.no_grad():
             output = self.model(token_ids, attention_mask=attention_masks)
-            logits = output.logits.detach()[torch.arange(sum(lengths)), indices]
+            logits = output.logits.detach()
+            logits = logits[torch.arange(logits.shape[0]), torch.cat(indices)]
+
 
         logprob_distribution = logits - logits.logsumexp(1).unsqueeze(1)
 
@@ -847,7 +830,7 @@ class MaskedLMScorer(LMScorer):
             word_ranks = [wr.tolist() for wr in word_ranks]
 
         scores = (
-            logprob_distribution[torch.arange(sum(lengths)), effective_token_ids]
+            logprob_distribution[torch.arange(logprob_distribution.shape[0]), effective_token_ids]
             .type(torch.DoubleTensor)
             .split(lengths)
         )
@@ -861,18 +844,6 @@ class MaskedLMScorer(LMScorer):
         else:
             return scores
 
-    def sequence_score(
-        self, batch, reduction=lambda x: x.mean(0).item(), base_two=False, PLL_metric="original"
-    ):
-        """
-        TODO: reduction should be a string, if it's a function, specify what kind of function. --> how to ensure it is always that type?
-        """
-        tokenized = self.prepare_text(batch, PLL_metric=PLL_metric)
-        scores = self.compute_stats(
-            tokenized, rank=False, base_two=base_two, return_tensors=True
-        )
-        reduced = list(map(reduction, scores))
-        return reduced
 
     def token_score(
         self,
@@ -909,7 +880,7 @@ class MaskedLMScorer(LMScorer):
             base_two and prob
         ), "cannot both use base (which is for a log), and a probability measure at the same time!"
 
-        tokenized = self.prepare_text(batch, PLL_metric=PLL_metric)
+        tokenized = list(self.prepare_text(batch, PLL_metric=PLL_metric))
         if rank:
             scores, ranks = self.compute_stats(
                 tokenized, rank=rank, prob=prob, base_two=base_two, return_tensors=True
@@ -924,11 +895,7 @@ class MaskedLMScorer(LMScorer):
 
         scores = [s.tolist() for s in scores]
 
-        indices = [
-            [i.item() for i in indexed if i.item() != self.tokenizer.pad_token_id]
-            for indexed in list(zip(*tokenized))[2]
-        ]
-        tokens = [self.decode(idx) for idx in indices]
+        tokens = [self.decode(batch[2]) for batch in tokenized]
 
         if rank:
             assert len(tokens) == len(scores) == len(ranks)
