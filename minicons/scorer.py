@@ -552,7 +552,8 @@ class MaskedLMScorer(LMScorer):
                 torch.tensor(target_token_indices),
             )
 
-    def prepare_text(self, text: Union[str, List[str], BatchEncoding], PLL_metric: Optional[str] = None) -> MaskedLMScorerComputeStatsFormat:
+    def prepare_text(self, text: Union[str, List[str], BatchEncoding], PLL_metric: Optional[str] = None
+                     ) -> Iterable[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
         """
         Prepares a batch of input text into a format fit to run MLM
         scoring on.
@@ -790,17 +791,19 @@ class MaskedLMScorer(LMScorer):
             base_two and prob
         ), "cannot both use base (which is for a log), and a probability measure at the same time!"
 
-        token_ids, attention_masks, effective_token_ids, indices = zip(*batch)
+        token_ids, attention_masks, target_token_ids, target_token_indices = zip(*batch)
+
+        target_token_ids = torch.cat(target_token_ids)
         
         token_ids = torch.cat(token_ids).to(self.device)
         attention_masks = torch.cat(attention_masks).to(self.device)
 
-        lengths = [len(inds) for inds in indices]
+        lengths = [len(inds) for inds in target_token_indices]
 
         with torch.no_grad():
             output = self.model(token_ids, attention_mask=attention_masks)
             logits = output.logits.detach()
-            logits = logits[torch.arange(logits.shape[0]), torch.cat(indices)]
+            logits = logits[torch.arange(logits.shape[0]), torch.cat(target_token_indices)]
 
 
         logprob_distribution = logits - logits.logsumexp(1).unsqueeze(1)
@@ -824,13 +827,13 @@ class MaskedLMScorer(LMScorer):
             https://stackoverflow.com/a/5284703
             """
             word_ranks = (-1.0 * logprob_distribution).argsort().argsort() + 1
-            word_ranks = word_ranks[torch.arange(shape[0]), effective_token_ids].split(
+            word_ranks = word_ranks[torch.arange(shape[0]), target_token_ids].split(
                 lengths
             )
             word_ranks = [wr.tolist() for wr in word_ranks]
 
         scores = (
-            logprob_distribution[torch.arange(logprob_distribution.shape[0]), effective_token_ids]
+            logprob_distribution[torch.arange(logprob_distribution.size(0)), target_token_ids]
             .type(torch.DoubleTensor)
             .split(lengths)
         )
