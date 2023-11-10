@@ -120,7 +120,7 @@ class LMScorer:
         raise NotImplementedError
 
     def prime_text(
-        self, preamble: Union[str, List[str]], stimuli: Union[str, List[str]]
+        self, prefix: Union[str, List[str]], stimuli: Union[str, List[str]]
     ) -> Tuple:
         raise NotImplementedError
 
@@ -594,7 +594,7 @@ class MaskedLMScorer(LMScorer):
         return self.get_masked_tensors(encoded, PLL_metric)
         
     def prime_text(
-        self, preamble: Union[str, List[str]], stimuli: Union[str, List[str]], PLL_metric: Optional[str] = None
+        self, prefix: Union[str, List[str]], stimuli: Union[str, List[str]], suffix: Union[None, str, List[str]] = None, PLL_metric: Optional[str] = None
     ) -> Iterable[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
         """
         Prepares a batch of input text into a format fit to run LM
@@ -610,28 +610,56 @@ class MaskedLMScorer(LMScorer):
         :return: Batch of formatted input that can be passed to
             ``compute_stats``
         """
-        if isinstance(preamble, str):
-            assert isinstance(stimuli, str)
-            preamble = [preamble]
+        if isinstance(stimuli, str):
+            assert isinstance(prefix, str)
+            prefix = [prefix]
             stimuli = [stimuli]
 
-        assert isinstance(stimuli, list)
+            if suffix is not None:
+                assert isinstance(suffix, str)
 
-        # comput the length of each preamble
-        preamble_encoded = self.encode(preamble, False)["input_ids"]
-        preamble_lens: List[int] = []
+        assert isinstance(prefix, list)
+        assert suffix is None or isinstance(suffix, list)
+
+        assert len(prefix) == len(stimuli)
+        assert suffix is None or len(suffix) == len(stimuli)
+
+        # compute the length of each preamble
+        prefix_encoded = self.encode(prefix, False)["input_ids"]
+        targets_start: List[int] = []
         
-        for preamble_tokens in preamble_encoded:
-            preamble_lens.append(sum(
+        for prefix_tokens in prefix_encoded:
+            targets_start.append(sum(
                 token != self.pad_token_id and token != self.sep_token_id
-                for token in preamble_tokens
+                for token in prefix_tokens
             ))
 
-        sentences = [p + " " + s for p, s in list(zip(preamble, stimuli))]
-        encoded = self.encode(sentences, manual_special=False)
+        targets_end: Optional[List[int]] = None
 
+        if suffix is None:
+            sentences = [p + " " + s for p, s in zip(prefix, stimuli)]
+            encoded = self.encode(sentences, manual_special=False)
 
-        return self.get_masked_tensors(encoded, PLL_metric=PLL_metric, targets_start=preamble_lens)
+        else:
+            targets_end = []
+
+            for stimuli_tokens, prefix_len in zip(self.encode(stimuli, False)["input_ids"], targets_start):
+                targets_end.append(
+                    prefix_len + sum(
+                        token != self.cls_token_id and token != self.pad_token_id and token != self.sep_token_id
+                        for token in stimuli_tokens
+                    )
+                )
+
+            sentences = [pre + " " + stim + " " + suff for pre, stim, suff in zip(prefix, stimuli, suffix)]
+            encoded = self.encode(sentences, manual_special=False)
+
+        return self.get_masked_tensors(
+            encoded,
+            PLL_metric=PLL_metric,
+            targets_start=targets_start,
+            targets_end=targets_end
+        )
 
     def distribution(self, batch: Iterable) -> torch.Tensor:
         """
