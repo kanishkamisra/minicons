@@ -27,7 +27,12 @@ class LMScorer:
     with methods to facilitate the analysis of language model output scores.
     """
 
-    def __init__(self, model: Union[str, torch.nn.Module], device: Optional[str] = "cpu", tokenizer=None) -> None:
+    def __init__(
+        self,
+        model: Union[str, torch.nn.Module],
+        device: Optional[str] = "cpu",
+        tokenizer=None,
+    ) -> None:
         """
         :param model: should be path to a model (.pt or .bin file) stored
             locally, or name of a pretrained model stored on the Huggingface
@@ -241,7 +246,7 @@ class LMScorer:
 
     def sequence_score(
         self,
-        stimuli,
+        batch,
         reduction=lambda x: x.mean(0).item(),
         prob: bool = False,
         base_two: bool = False,
@@ -250,8 +255,8 @@ class LMScorer:
         """
         Pooled estimates of sequence log probabilities (or some modification of it).
 
-        :param stimuli: a batch of sequences whose score you want to calculate.
-        :type stimuli: ``Union[str, List[str]]``
+        :param batch: a batch of sequences whose score you want to calculate.
+        :type batch: ``Union[str, List[str]]``
         :param reduction: Reduction function, is selected to be
             ``lambda x: x.mean(0).item()`` by default, which stands for the avg. log-probability per token for each sequence in the batch.
         :type reduction: Callable
@@ -261,7 +266,7 @@ class LMScorer:
 
         TODO: reduction should be a string, if it's a function, specify what kind of function. --> how to ensure it is always that type?
         """
-        tokenized = self.prepare_text(stimuli, **kw)
+        tokenized = self.prepare_text(batch, **kw)
         scores = self.compute_stats(
             tokenized, rank=False, base_two=base_two, prob=prob, return_tensors=True
         )
@@ -337,7 +342,7 @@ class MaskedLMScorer(LMScorer):
         Huggingface model obtained from `AutoModelForMaskedLM`. In the last
         case, a corresponding tokenizer must also be provided.
     :param device: device type that the model should be loaded on,
-        options: `cpu or cuda:{0, 1, ...}`
+        options: `cpu or cuda:{0, 1, ...} or auto`
     :type device: str, optional
     :param tokenizer: if provided, use this tokenizer.
     """
@@ -348,6 +353,7 @@ class MaskedLMScorer(LMScorer):
         device: Optional[str] = "cpu",
         tokenizer=None,
         PLL_metric: str = "original",
+        **kwargs,
     ) -> None:
         """
         :param model: should be path to a model (.pt or .bin file) stored
@@ -364,8 +370,10 @@ class MaskedLMScorer(LMScorer):
         super(MaskedLMScorer, self).__init__(model, device=device, tokenizer=tokenizer)
 
         if isinstance(model, str):
-            self.model = AutoModelForMaskedLM.from_pretrained(model, return_dict=True)
-            self.model.to(self.device)
+            self.model = AutoModelForMaskedLM.from_pretrained(
+                model, return_dict=True, device_map=self.device, **kwargs
+            )
+            # self.model.to(self.device)
             self.model.eval()
         else:
             self.model = model
@@ -449,7 +457,8 @@ class MaskedLMScorer(LMScorer):
         sentences, words  = self.mask(sentence_words)
 
         encoded = self.tokenizer(sentences, return_tensors="pt")
-        encoded = encoded.to(self.device)
+        if self.device != "auto":
+            encoded = encoded.to(self.device)
 
         idx = torch.nonzero(
             encoded["input_ids"] == self.tokenizer.mask_token_id, as_tuple=False
@@ -552,8 +561,11 @@ class MaskedLMScorer(LMScorer):
                 torch.tensor(target_token_indices),
             )
 
-    def prepare_text(self, text: Union[str, List[str], BatchEncoding], PLL_metric: Optional[str] = None
-                     ) -> Iterable[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
+    def prepare_text(
+        self,
+        text: Union[str, List[str], BatchEncoding],
+        PLL_metric: Optional[str] = "original",
+    ) -> Iterable[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
         """
         Prepares a batch of input text into a format fit to run MLM
         scoring on.
@@ -580,7 +592,7 @@ class MaskedLMScorer(LMScorer):
 
     
         return self.get_masked_tensors(encoded, PLL_metric)
-
+        
     def prime_text(
         self, preamble: Union[str, List[str]], stimuli: Union[str, List[str]], PLL_metric: Optional[str] = None
     ) -> Iterable[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
@@ -636,8 +648,9 @@ class MaskedLMScorer(LMScorer):
         )
         token_ids = torch.cat(token_ids)
         attention_masks = torch.cat(attention_masks)
-        token_ids = token_ids.to(self.device)
-        attention_masks = attention_masks.to(self.device)
+        if self.device != "auto":
+            token_ids = token_ids.to(self.device)
+            attention_masks = attention_masks.to(self.device)
         effective_token_ids = torch.cat([torch.tensor(x) for x in effective_token_ids])
 
         indices = list(
@@ -689,10 +702,11 @@ class MaskedLMScorer(LMScorer):
             encoded = self.tokenizer(
                 masked, add_special_tokens=False, return_tensors="pt", padding=True
             )
-            encoded = encoded.to(self.device)
+            if self.device != "auto":
+                encoded = encoded.to(self.device)
             logits = self.model(**encoded)
             presoftmax = logits.logits[torch.arange(len(queries)), mask_idx]
-            if "cuda" in self.device:
+            if "cuda" in self.device or "auto" in self.device:
                 presoftmax = presoftmax.detach().cpu()
             else:
                 presoftmax = presoftmax.detach()
@@ -723,8 +737,9 @@ class MaskedLMScorer(LMScorer):
         )
         token_ids = torch.cat(token_ids)
         attention_masks = torch.cat(attention_masks)
-        token_ids = token_ids.to(self.device)
-        attention_masks = attention_masks.to(self.device)
+        if self.device != "auto":
+            token_ids = token_ids.to(self.device)
+            attention_masks = attention_masks.to(self.device)
         effective_token_ids = torch.cat([torch.tensor(x) for x in effective_token_ids])
 
         sent_tokens = list(
@@ -742,8 +757,8 @@ class MaskedLMScorer(LMScorer):
         with torch.no_grad():
             output = self.model(token_ids, attention_mask=attention_masks)
             logits = output.logits[torch.arange(sum(lengths)), indices]
-            if self.device == "cuda:0" or self.device == "cuda:1":
-                logits.detach()
+            if "cuda" in self.device:
+                logits.detach().cpu()
 
             sent_log_probs = logits - logits.logsumexp(1).unsqueeze(1)
             if rank:
@@ -795,8 +810,12 @@ class MaskedLMScorer(LMScorer):
 
         target_token_ids = torch.cat(target_token_ids)
         
-        token_ids = torch.cat(token_ids).to(self.device)
-        attention_masks = torch.cat(attention_masks).to(self.device)
+        token_ids = torch.cat(token_ids)
+        attention_masks = torch.cat(attention_masks)
+
+        if self.device != "auto":
+            token_ids = token_ids.to(self.device)
+            attention_masks = attention_masks.to(self.device)
 
         lengths = [len(inds) for inds in target_token_indices]
 
@@ -847,7 +866,6 @@ class MaskedLMScorer(LMScorer):
         else:
             return scores
 
-
     def token_score(
         self,
         batch: Union[str, List[str]],
@@ -855,7 +873,7 @@ class MaskedLMScorer(LMScorer):
         prob: bool = False,
         base_two: bool = False,
         rank: bool = False,
-        PLL_metric: str = "original"
+        PLL_metric: str = "original",
     ) -> Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]:
         """
         For every input sentence, returns a list of tuples in the following format:
@@ -932,7 +950,13 @@ class IncrementalLMScorer(LMScorer):
     :param tokenizer: if provided, use this tokenizer.
     """
 
-    def __init__(self, model: Union[str, torch.nn.Module], device: Optional[str] = "cpu", tokenizer=None) -> None:
+    def __init__(
+        self,
+        model: Union[str, torch.nn.Module],
+        device: Optional[str] = "cpu",
+        tokenizer=None,
+        **kwargs,
+    ) -> None:
         """
         :param model: should be path to a model (.pt or .bin file) stored
             locally, or name of a pretrained model stored on the Huggingface
@@ -945,17 +969,23 @@ class IncrementalLMScorer(LMScorer):
         :type device: str, optional
         :param tokenizer: if provided, use this tokenizer.
         """
-        super(IncrementalLMScorer, self).__init__(model, device=device, tokenizer=tokenizer)
+        super(IncrementalLMScorer, self).__init__(
+            model, device=device, tokenizer=tokenizer
+        )
 
         if isinstance(model, str):
-            self.model = AutoModelForCausalLM.from_pretrained(model, return_dict=True)
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model, return_dict=True, device_map=self.device, **kwargs
+            )
         else:
             self.model = model
 
         # define CLS and SEP tokens
         if self.tokenizer.pad_token is None:
             if tokenizer is not None:
-                warnings.warn("tokenizer is changed by adding pad_token_id to the tokenizer.")
+                warnings.warn(
+                    "tokenizer is changed by adding pad_token_id to the tokenizer."
+                )
             if self.tokenizer.eos_token is not None:
                 self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
             else:
@@ -969,7 +999,6 @@ class IncrementalLMScorer(LMScorer):
             self.tokenizer.padding_side = "right"
 
         if isinstance(model, str):
-            self.model.to(self.device)
             self.model.eval()
 
         self.padding_side = self.tokenizer.padding_side
@@ -1099,15 +1128,16 @@ class IncrementalLMScorer(LMScorer):
         """
         batch, offsets = batch
         ids = batch["input_ids"]
-        ids = ids.to(self.device)
         attention_masks = batch["attention_mask"]
-        attention_masks = attention_masks.to(self.device)
+        if self.device != "auto":
+            ids = ids.to(self.device)
+            attention_masks = attention_masks.to(self.device)
         nopad_mask = ids != self.tokenizer.pad_token_id
 
         with torch.no_grad():
             outputs = self.model(ids, attention_mask=attention_masks)
             logits = outputs.logits
-            if self.device == "cuda:0" or self.device == "cuda:1":
+            if "cuda" in self.device or "auto" in self.device:
                 logits.detach()
 
         outputs = []
@@ -1135,7 +1165,8 @@ class IncrementalLMScorer(LMScorer):
         Returns the log probability distribution of the next word.
         """
         encoded = self.encode(queries)
-        encoded = encoded.to(self.device)
+        if self.device != "auto":
+            encoded = encoded.to(self.device)
         query_ids = [
             [j for j, i in enumerate(instance) if i != self.tokenizer.pad_token_id][-1]
             for instance in encoded["input_ids"].tolist()
@@ -1177,7 +1208,8 @@ class IncrementalLMScorer(LMScorer):
         ), "cannot both use base (which is for a log), and a probability measure at the same time!"
 
         encoded, offsets = batch
-        encoded = encoded.to(self.device)
+        if self.device != "auto":
+            encoded = encoded.to(self.device)
 
         # ids = [
         #     [i for i in instance if i != self.tokenizer.pad_token_id]
@@ -1384,15 +1416,16 @@ class IncrementalLMScorer(LMScorer):
         )
         batch, offsets = batch
         ids = batch["input_ids"]
-        ids = ids.to(self.device)
         attention_masks = batch["attention_mask"]
-        attention_masks = attention_masks.to(self.device)
+        if self.device != "auto":
+            ids = ids.to(self.device)
+            attention_masks = attention_masks.to(self.device)
         nopad_mask = ids != self.tokenizer.pad_token_id
 
         with torch.no_grad():
             outputs = self.model(ids, attention_mask=attention_masks)
             logits = outputs.logits
-            if self.device == "cuda:0" or self.device == "cuda:1":
+            if "cuda" in self.device or "auto" in self.device:
                 logits.detach()
 
         outputs = []
@@ -1469,7 +1502,8 @@ class IncrementalLMScorer(LMScorer):
 
         self.tokenizer.padding_side = "left"
         tokenized = self.tokenizer(batch, return_tensors="pt", padding=True)
-        tokenized = tokenized.to(self.device)
+        if self.device != "auto":
+            tokenized = tokenized.to(self.device)
 
         outputs = self.model.generate(
             **tokenized,
@@ -1514,7 +1548,13 @@ class Seq2SeqScorer(LMScorer):
     :param tokenizer: if provided, use this tokenizer.
     """
 
-    def __init__(self, model: Union[str, torch.nn.Module], device: Optional[str] = "cpu", tokenizer=None) -> None:
+    def __init__(
+        self,
+        model: Union[str, torch.nn.Module],
+        device: Optional[str] = "cpu",
+        tokenizer=None,
+        **kwargs,
+    ) -> None:
         """
         :param model: should be path to a model (.pt or .bin file) stored
             locally, or name of a pretrained model stored on the Huggingface
@@ -1530,14 +1570,18 @@ class Seq2SeqScorer(LMScorer):
         super(Seq2SeqScorer, self).__init__(model, device=device, tokenizer=tokenizer)
 
         if isinstance(model, str):
-            self.model = AutoModelForSeq2SeqLM.from_pretrained(model, return_dict=True)
+            self.model = AutoModelForSeq2SeqLM.from_pretrained(
+                model, device_map=self.device, return_dict=True, **kwargs
+            )
         else:
             self.model = model
 
         # define CLS and SEP tokens
         if self.tokenizer.pad_token is None:
             if tokenizer is not None:
-                warnings.warn("tokenizer is changed by adding pad_token to the tokenizer.")
+                warnings.warn(
+                    "tokenizer is changed by adding pad_token to the tokenizer."
+                )
             self.tokenizer.add_special_tokens(
                 {"additional_special_tokens": ["<|pad|>"]}
             )
@@ -1545,7 +1589,9 @@ class Seq2SeqScorer(LMScorer):
 
         if self.tokenizer.bos_token is None:
             if tokenizer is not None:
-                warnings.warn("tokenizer is changed by adding bos_token to the tokenizer.")
+                warnings.warn(
+                    "tokenizer is changed by adding bos_token to the tokenizer."
+                )
             self.tokenizer.add_special_tokens(
                 {"additional_special_tokens": ["<|bos|>"]}
             )
@@ -1553,7 +1599,8 @@ class Seq2SeqScorer(LMScorer):
 
         if isinstance(model, str):
             self.model.resize_token_embeddings(len(self.tokenizer))
-            self.model.to(self.device)
+            if self.device != "auto":
+                self.model.to(self.device)
             self.model.eval()
 
     def add_special_tokens(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
@@ -1642,15 +1689,16 @@ class Seq2SeqScorer(LMScorer):
         """
         batch, offsets = batch
         ids = batch["input_ids"]
-        ids = ids.to(self.device)
         attention_masks = batch["attention_mask"]
-        attention_masks = attention_masks.to(self.device)
+        if self.device != "auto":
+            ids = ids.to(self.device)
+            attention_masks = attention_masks.to(self.device)
         nopad_mask = ids != self.tokenizer.pad_token_id
 
         with torch.no_grad():
             outputs = self.model(ids, attention_mask=attention_masks)
             logits = outputs.logits
-            if self.device == "cuda:0" or self.device == "cuda:1":
+            if "cuda" in self.device:
                 logits.detach()
 
         outputs = []
@@ -1678,7 +1726,8 @@ class Seq2SeqScorer(LMScorer):
         Returns the log probability distribution of the next word.
         """
         encoded = self.encode(queries)
-        encoded = encoded.to(self.device)
+        if self.device != "auto":
+            encoded = encoded.to(self.device)
         query_ids = [
             [j for j, i in enumerate(instance) if i != self.tokenizer.pad_token_id][-1]
             for instance in encoded["input_ids"].tolist()
@@ -1722,8 +1771,9 @@ class Seq2SeqScorer(LMScorer):
 
         source_encoded, source_offsets = source
         target_encoded, target_offsets = batch
-        source_ids = source_encoded["input_ids"].to(self.device)
-        target_ids = target_encoded["input_ids"].to(self.device)
+        if self.device != "auto":
+            source_ids = source_encoded["input_ids"].to(self.device)
+            target_ids = target_encoded["input_ids"].to(self.device)
 
         source_ids_list = [
             [i for i in instance if i != self.tokenizer.pad_token_id]
@@ -1945,15 +1995,16 @@ class Seq2SeqScorer(LMScorer):
         )
         batch, offsets = batch
         ids = batch["input_ids"]
-        ids = ids.to(self.device)
         attention_masks = batch["attention_mask"]
-        attention_masks = attention_masks.to(self.device)
+        if self.device != "auto":
+            ids = ids.to(self.device)
+            attention_masks = attention_masks.to(self.device)
         nopad_mask = ids != self.tokenizer.pad_token_id
 
         with torch.no_grad():
             outputs = self.model(ids, attention_mask=attention_masks)
             logits = outputs.logits
-            if self.device == "cuda:0" or self.device == "cuda:1":
+            if "cuda" in self.device:
                 logits.detach()
 
         outputs = []
