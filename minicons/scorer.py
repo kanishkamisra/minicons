@@ -371,7 +371,7 @@ class MaskedLMScorer(LMScorer):
 
         if isinstance(model, str):
             self.model = AutoModelForMaskedLM.from_pretrained(
-                model, return_dict=True, device_map=self.device, **kwargs
+                model, return_dict=True, **kwargs
             )
             # self.model.to(self.device)
             self.model.eval()
@@ -1003,7 +1003,7 @@ class IncrementalLMScorer(LMScorer):
 
         if isinstance(model, str):
             self.model = AutoModelForCausalLM.from_pretrained(
-                model, return_dict=True, device_map=self.device, **kwargs
+                model, return_dict=True, **kwargs
             )
         else:
             self.model = model
