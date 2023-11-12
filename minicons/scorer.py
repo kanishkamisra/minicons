@@ -1599,7 +1599,7 @@ class Seq2SeqScorer(LMScorer):
 
         if isinstance(model, str):
             self.model = AutoModelForSeq2SeqLM.from_pretrained(
-                model, device_map=self.device, return_dict=True, **kwargs
+                model, return_dict=True, **kwargs
             )
         else:
             self.model = model
