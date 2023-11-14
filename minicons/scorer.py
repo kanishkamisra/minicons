@@ -374,9 +374,12 @@ class MaskedLMScorer(LMScorer):
                 model, return_dict=True, **kwargs
             )
             # self.model.to(self.device)
-            self.model.eval()
         else:
             self.model = model
+
+        if self.device != "auto":
+            self.model.to(self.device)
+        self.model.eval()
 
         self.PLL_metric: str = PLL_metric
         # define CLS and SEP tokens
@@ -1007,6 +1010,9 @@ class IncrementalLMScorer(LMScorer):
             )
         else:
             self.model = model
+
+        if self.device != "auto":
+            self.model.to(self.device)
 
         # define CLS and SEP tokens
         if self.tokenizer.pad_token is None:
