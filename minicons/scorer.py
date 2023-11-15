@@ -1013,7 +1013,7 @@ class IncrementalLMScorer(LMScorer):
                 model, return_dict=True, **kwargs
             )
             if self.device=="auto":
-                self.model = AutoModelForMaskedLM.from_pretrained(
+                self.model = AutoModelForCausalLM.from_pretrained(
                 model, device_map=self.device, return_dict=True, **kwargs
             )
         else:
