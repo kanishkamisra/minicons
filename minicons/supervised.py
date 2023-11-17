@@ -11,7 +11,7 @@ class SupervisedHead:
     analyses of model outputs.
     """
 
-    def __init__(self, model_name: str, device: Optional[str] = "cpu") -> None:
+    def __init__(self, model_name: str, device: Optional[str] = "cpu", **kwargs) -> None:
         """
         :param model_name: name of the model, should either be a path
             to a model (.pt or .bin file) stored locally, or a
@@ -26,8 +26,10 @@ class SupervisedHead:
         self.model = AutoModelForSequenceClassification.from_pretrained(
             model_name,
             return_dict=True,
+            **kwargs
         )
-        self.model.to(self.device)
+        if self.device != "auto":
+            self.model.to(self.device)
         self.model.eval()
 
     def encode(
@@ -46,7 +48,7 @@ class SupervisedHead:
         inputs = [inputs] if isinstance(inputs, str) else inputs
 
         encoded = self.tokenizer(inputs, padding="longest", return_tensors="pt")
-        if self.device != "cpu":
+        if self.device != "cpu" and self.device != "auto":
             encoded = encoded.to(self.device)
 
         return encoded
