@@ -1030,6 +1030,66 @@ class MaskedLMScorer(LMScorer):
                 res.append(list(zip(t, s)))
 
         return res
+    
+    def conditional_score(
+        self,
+        prefix: Union[str, List[str]],
+        stimuli: Union[str, List[str]],
+        suffix: Union[None, str, List[str]] = None,
+        separator: str = " ",
+        reduction: Callable = lambda x: x.mean(0).item(),
+        prob: bool = False,
+        base_two: bool = False,
+        **kw,
+    ) -> List[float]:
+        """
+        Pooled estimates of sequence log probabilities (or some modification of it), given a prefix. Pooling is usually done using a function that is passed to the method.
+
+        :param prefix: a batch of prefixes or primes passed to the
+            language model. This is what the sequence is conditioned on, and the model ignores the word probabilities of this part of the input in estimating the overall score.
+        :type prefix: ``Union[str, List[str]]``
+        :param stimuli: a batch of sequences (same length as prefix)
+            that form the main input consisting of the sequence whose
+            score you want to calculate.
+        :type stimuli: ``Union[str, List[str]]``
+        :param reduction: Reduction function, is selected to be
+            ``lambda x: x.mean(0).item()`` by default, which stands for the avg. log-probability per token for each sequence in the batch.
+        :type reduction: Callable
+        :param kw: model-specific keyword arguments to pass to the `prepare_text` function
+        :return: List of floats specifying the desired score for the stimuli part of the input, e.g., P(stimuli | preamble).
+        :rtype: ``List[float]``
+        """
+        primed = self.prime_text(prefix, stimuli, suffix, separator, **kw)
+
+        result = self.compute_stats(
+            primed, rank=False, base_two=base_two, prob=prob, return_tensors=True
+        )
+        logprob = result
+        reduced = list(map(reduction, logprob))
+
+        return reduced
+    
+    def partial_score(
+        self,
+        preamble: Union[str, List[str]],
+        stimuli: Union[str, List[str]],
+        suffix: Union[None, str, List[str]] = None,
+        separator: str = " ",
+        reduction: Callable = lambda x: x.mean(0).item(),
+        **kwargs,
+    ) -> List[float]:
+        warnings.warn(
+            "partial_score is deprecated, use conditional_score instead",
+            DeprecationWarning,
+        )
+        return self.conditional_score(
+            prefix=preamble,
+            stimuli=stimuli,
+            suffix=suffix,
+            separator=separator,
+            reduction=reduction,
+            **kwargs,
+        )
 
 
 class IncrementalLMScorer(LMScorer):
