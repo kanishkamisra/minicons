@@ -1,5 +1,15 @@
 """Utilities for scoring sequences using Language Models."""
-from typing import Iterable, Union, List, Collection, Optional, Callable, Tuple, Any, cast
+from typing import (
+    Iterable,
+    Union,
+    List,
+    Collection,
+    Optional,
+    Callable,
+    Tuple,
+    Any,
+    cast,
+)
 
 import torch
 import warnings
@@ -113,14 +123,22 @@ class LMScorer:
 
     def compute_stats(
         self, batch: Iterable, rank: bool = False
-    ) -> Union[Tuple[List[float], List[int]], List[float], torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    ) -> Union[
+        Tuple[List[float], List[int]],
+        List[float],
+        torch.Tensor,
+        Tuple[torch.Tensor, torch.Tensor],
+    ]:
         raise NotImplementedError
 
     def prepare_text(self, text: Union[str, List[str], BatchEncoding]) -> Any:
         raise NotImplementedError
 
     def prime_text(
-        self, prefix: Union[str, List[str]], stimuli: Union[str, List[str]]
+        self,
+        prefix: Union[str, List[str]],
+        stimuli: Union[str, List[str]],
+        separator: str = " ",
     ) -> Tuple:
         raise NotImplementedError
 
@@ -199,6 +217,7 @@ class LMScorer:
         self,
         preamble: Union[str, List[str]],
         stimuli: Union[str, List[str]],
+        separator: str = " ",
         reduction: Callable = lambda x: x.mean(0).item(),
         **kwargs,
     ) -> List[float]:
@@ -206,12 +225,19 @@ class LMScorer:
             "partial_score is deprecated, use conditional_score instead",
             DeprecationWarning,
         )
-        return self.conditional_score(preamble, stimuli, reduction, **kwargs)
+        return self.conditional_score(
+            prefix=preamble,
+            stimuli=stimuli,
+            separator=separator,
+            reduction=reduction,
+            **kwargs,
+        )
 
     def conditional_score(
         self,
         prefix: Union[str, List[str]],
         stimuli: Union[str, List[str]],
+        separator: str = " ",
         reduction: Callable = lambda x: x.mean(0).item(),
         prob: bool = False,
         base_two: bool = False,
@@ -230,12 +256,12 @@ class LMScorer:
         :param reduction: Reduction function, is selected to be
             ``lambda x: x.mean(0).item()`` by default, which stands for the avg. log-probability per token for each sequence in the batch.
         :type reduction: Callable
-        :param kw: model-specific keyword arguments to pass to the `prepare_text` function 
+        :param kw: model-specific keyword arguments to pass to the `prepare_text` function
         :return: List of floats specifying the desired score for the stimuli part of the input, e.g., P(stimuli | preamble).
         :rtype: ``List[float]``
         """
-        primed = self.prime_text(prefix, stimuli, **kw)
-        
+        primed = self.prime_text(prefix, stimuli, separator, **kw)
+
         result = self.compute_stats(
             primed, rank=False, base_two=base_two, prob=prob, return_tensors=True
         )
@@ -250,7 +276,7 @@ class LMScorer:
         reduction=lambda x: x.mean(0).item(),
         prob: bool = False,
         base_two: bool = False,
-        **kw
+        **kw,
     ):
         """
         Pooled estimates of sequence log probabilities (or some modification of it).
@@ -260,7 +286,7 @@ class LMScorer:
         :param reduction: Reduction function, is selected to be
             ``lambda x: x.mean(0).item()`` by default, which stands for the avg. log-probability per token for each sequence in the batch.
         :type reduction: Callable
-        :param kw: model-specific keyword arguments to pass to the `prepare_text` function 
+        :param kw: model-specific keyword arguments to pass to the `prepare_text` function
         :return: List of floats specifying the desired score for the stimuli part of the input, e.g., P(stimuli | preamble).
         :rtype: ``List[float]``
 
@@ -272,7 +298,7 @@ class LMScorer:
         )
         reduced = list(map(reduction, scores))
         return reduced
-    
+
     def encode(
         self,
         text: Union[str, List[str]],
@@ -373,10 +399,10 @@ class MaskedLMScorer(LMScorer):
             self.model = AutoModelForMaskedLM.from_pretrained(
                 model, return_dict=True, **kwargs
             )
-            if self.device=="auto":
+            if self.device == "auto":
                 self.model = AutoModelForMaskedLM.from_pretrained(
-                model, device_map=self.device, return_dict=True, **kwargs
-            )
+                    model, device_map=self.device, return_dict=True, **kwargs
+                )
             # self.model.to(self.device)
         else:
             self.model = model
@@ -438,11 +464,13 @@ class MaskedLMScorer(LMScorer):
 
         for sentence, word in sentence_words:
             words.append(word)
-            sentences.append(sub(
-                rf"(?<![\w\/-])({word})(?=[^\w\/-])",
-                self.tokenizer.mask_token,
-                sentence,
-            ))
+            sentences.append(
+                sub(
+                    rf"(?<![\w\/-])({word})(?=[^\w\/-])",
+                    self.tokenizer.mask_token,
+                    sentence,
+                )
+            )
 
         return (sentences, words)
 
@@ -461,9 +489,10 @@ class MaskedLMScorer(LMScorer):
         :return: A tensor with log probabilities for the desired word
             in context
         """
-        sentences, words  = self.mask(sentence_words)
+        sentences, words = self.mask(sentence_words)
 
         encoded = self.tokenizer(sentences, return_tensors="pt")
+
         if self.device != "auto":
             encoded = encoded.to(self.device)
 
@@ -498,11 +527,13 @@ class MaskedLMScorer(LMScorer):
         targets_start: Optional[List[int]] = None,
         targets_end: Optional[List[int]] = None,
     ) -> Iterable[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
-        """Create batches of tokenized instances with each token in the sequence replaced by the mask token. """
+        """Create batches of tokenized instances with each token in the sequence replaced by the mask token."""
         if PLL_metric is None:
             PLL_metric = self.PLL_metric
 
-        for batch_index, (token_ids, attention_mask) in enumerate(zip(encoded["input_ids"] , encoded["attention_mask"])):
+        for batch_index, (token_ids, attention_mask) in enumerate(
+            zip(encoded["input_ids"], encoded["attention_mask"])
+        ):
             token_ids = torch.tensor(token_ids)
             attention_mask = torch.tensor(attention_mask)
 
@@ -515,7 +546,10 @@ class MaskedLMScorer(LMScorer):
                     token_id != self.pad_token_id
                     and token_id != self.cls_token_id
                     and token_id != self.sep_token_id
-                    and (targets_start is None or token_index >= targets_start[batch_index])
+                    and (
+                        targets_start is None
+                        or token_index >= targets_start[batch_index]
+                    )
                     and (targets_end is None or token_index < targets_end[batch_index])
                 ):
                     target_token_ids.append(token_id)
@@ -526,23 +560,27 @@ class MaskedLMScorer(LMScorer):
 
             # mask tokens based on the current token to be predicted
             mask_indices: List[List[int]]
-            
+
             if PLL_metric == "within_word_l2r":
                 """
                 Future tokens belonging to the same word as the target token are masked during token inference as well.
                 """
-                word_ids = encoded.word_ids(batch_index=batch_index)  # only used for this PLL_metric
+                word_ids = encoded.word_ids(
+                    batch_index=batch_index
+                )  # only used for this PLL_metric
 
                 mask_indices = [
                     # mask the target token and all following tokens which belong to the same word
-                    [mask_pos] + [
-                        j for j in range(mask_pos + 1, target_token_indices[-1] + 1)
+                    [mask_pos]
+                    + [
+                        j
+                        for j in range(mask_pos + 1, target_token_indices[-1] + 1)
                         if word_ids[j] == word_ids[mask_pos]
                     ]
                     if word_ids[mask_pos] is not None
                     else [mask_pos]  # mask this token
                     for mask_pos in target_token_indices
-               ]
+                ]
 
             elif PLL_metric == "original":
                 # Original PLL metric
@@ -597,11 +635,15 @@ class MaskedLMScorer(LMScorer):
             sentences = [text] if isinstance(text, str) else text
             encoded = self.encode(sentences, manual_special=False)
 
-    
         return self.get_masked_tensors(encoded, PLL_metric)
-        
+
     def prime_text(
-        self, prefix: Union[str, List[str]], stimuli: Union[str, List[str]], suffix: Union[None, str, List[str]] = None, PLL_metric: Optional[str] = None
+        self,
+        prefix: Union[str, List[str]],
+        stimuli: Union[str, List[str]],
+        suffix: Union[None, str, List[str]] = None,
+        separator: str = " ",
+        PLL_metric: Optional[str] = None,
     ) -> Iterable[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
         """
         Prepares a batch of input text into a format fit to run LM
@@ -634,38 +676,48 @@ class MaskedLMScorer(LMScorer):
         # compute the length of each preamble
         prefix_encoded = self.encode(prefix, False)["input_ids"]
         targets_start: List[int] = []
-        
+
         for prefix_tokens in prefix_encoded:
-            targets_start.append(sum(
-                token != self.pad_token_id and token != self.sep_token_id
-                for token in prefix_tokens
-            ))
+            targets_start.append(
+                sum(
+                    token != self.pad_token_id and token != self.sep_token_id
+                    for token in prefix_tokens
+                )
+            )
 
         targets_end: Optional[List[int]] = None
 
         if suffix is None:
-            sentences = [p + " " + s for p, s in zip(prefix, stimuli)]
+            sentences = [p + separator + s for p, s in zip(prefix, stimuli)]
             encoded = self.encode(sentences, manual_special=False)
 
         else:
             targets_end = []
 
-            for stimuli_tokens, prefix_len in zip(self.encode(stimuli, False)["input_ids"], targets_start):
+            for stimuli_tokens, prefix_len in zip(
+                self.encode(stimuli, False)["input_ids"], targets_start
+            ):
                 targets_end.append(
-                    prefix_len + sum(
-                        token != self.cls_token_id and token != self.pad_token_id and token != self.sep_token_id
+                    prefix_len
+                    + sum(
+                        token != self.cls_token_id
+                        and token != self.pad_token_id
+                        and token != self.sep_token_id
                         for token in stimuli_tokens
                     )
                 )
 
-            sentences = [pre + " " + stim + " " + suff for pre, stim, suff in zip(prefix, stimuli, suffix)]
+            sentences = [
+                pre + separator + stim + separator + suff
+                for pre, stim, suff in zip(prefix, stimuli, suffix)
+            ]
             encoded = self.encode(sentences, manual_special=False)
 
         return self.get_masked_tensors(
             encoded,
             PLL_metric=PLL_metric,
             targets_start=targets_start,
-            targets_end=targets_end
+            targets_end=targets_end,
         )
 
     def distribution(self, batch: Iterable) -> torch.Tensor:
@@ -701,7 +753,9 @@ class MaskedLMScorer(LMScorer):
 
         return logprob_distribution
 
-    def cloze_distribution(self, queries: Union[Collection[Tuple[str, str]], Tuple[str, str]]) -> torch.Tensor:
+    def cloze_distribution(
+        self, queries: Union[Collection[Tuple[str, str]], Tuple[str, str]]
+    ) -> torch.Tensor:
         """
         Accepts as input batch of [(s_i, bw_i)] where s_i is a prompt with an
         abstract token (bw_i) representing a blank word and returns a distribution
@@ -711,10 +765,10 @@ class MaskedLMScorer(LMScorer):
 
         :return: Tensor contisting of log probabilities over vocab items.
         """
-        
+
         if len(queries) == 0:
             return torch.tensor([])
-        
+
         if isinstance(next(iter(queries)), str):
             queries = [cast(Tuple[str, str], queries)]
 
@@ -824,7 +878,12 @@ class MaskedLMScorer(LMScorer):
         base_two: bool = False,
         prob: bool = False,
         return_tensors: bool = False,
-    ) -> Union[Tuple[List[float], List[int]], List[float], torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    ) -> Union[
+        Tuple[List[float], List[int]],
+        List[float],
+        torch.Tensor,
+        Tuple[torch.Tensor, torch.Tensor],
+    ]:
         """
         Primary computational method that processes a batch of prepared sentences and returns per-token scores for each sentence. By default, returns log-probabilities.
 
@@ -844,7 +903,7 @@ class MaskedLMScorer(LMScorer):
         token_ids, attention_masks, target_token_ids, target_token_indices = zip(*batch)
 
         target_token_ids = torch.cat(target_token_ids)
-        
+
         token_ids = torch.cat(token_ids)
         attention_masks = torch.cat(attention_masks)
 
@@ -857,8 +916,9 @@ class MaskedLMScorer(LMScorer):
         with torch.no_grad():
             output = self.model(token_ids, attention_mask=attention_masks)
             logits = output.logits.detach()
-            logits = logits[torch.arange(logits.shape[0]), torch.cat(target_token_indices)]
-
+            logits = logits[
+                torch.arange(logits.shape[0]), torch.cat(target_token_indices)
+            ]
 
         logprob_distribution = logits - logits.logsumexp(1).unsqueeze(1)
 
@@ -887,7 +947,9 @@ class MaskedLMScorer(LMScorer):
             word_ranks = [wr.tolist() for wr in word_ranks]
 
         scores = (
-            logprob_distribution[torch.arange(logprob_distribution.size(0)), target_token_ids]
+            logprob_distribution[
+                torch.arange(logprob_distribution.size(0)), target_token_ids
+            ]
             .type(torch.DoubleTensor)
             .split(lengths)
         )
@@ -1012,10 +1074,10 @@ class IncrementalLMScorer(LMScorer):
             self.model = AutoModelForCausalLM.from_pretrained(
                 model, return_dict=True, **kwargs
             )
-            if self.device=="auto":
+            if self.device == "auto":
                 self.model = AutoModelForCausalLM.from_pretrained(
-                model, device_map=self.device, return_dict=True, **kwargs
-            )
+                    model, device_map=self.device, return_dict=True, **kwargs
+                )
         else:
             self.model = model
 
@@ -1094,7 +1156,11 @@ class IncrementalLMScorer(LMScorer):
 
         text = [text] if isinstance(text, str) else text
         text = [_format(self, t, bos_token, eos_token) for t in text]
-        return self.tokenizer(text, return_tensors="pt", padding=True)
+        encoded = self.tokenizer(text, return_tensors="pt", padding=True)
+        if "token_type_ids" in encoded.keys():
+            encoded.pop("token_type_ids")
+            
+        return encoded
 
     def prepare_text(
         self,
@@ -1122,6 +1188,7 @@ class IncrementalLMScorer(LMScorer):
         self,
         preamble: Union[str, List[str]],
         stimuli: Union[str, List[str]],
+        separator=" ",
         bos_token=False,
         eos_token=False,
     ) -> Tuple:
@@ -1152,9 +1219,9 @@ class IncrementalLMScorer(LMScorer):
             )
 
         sentences = (
-            [preamble + " " + stimuli]
+            [preamble + separator + stimuli]
             if isinstance(preamble, str)
-            else [p + " " + s for p, s in list(zip(preamble, stimuli))]
+            else [p + separator + s for p, s in list(zip(preamble, stimuli))]
         )
 
         return self.encode(sentences, bos_token, eos_token), preamble_lens
@@ -1202,11 +1269,11 @@ class IncrementalLMScorer(LMScorer):
             outputs.append(sent_logits[-1])
         return torch.stack(outputs, 0)
 
-    def next_word_distribution(self, queries: List, surprisal: bool = False):
+    def next_word_distribution(self, queries: List, bos_token=False, eos_token=False, surprisal: bool = False):
         """
         Returns the log probability distribution of the next word.
         """
-        encoded = self.encode(queries)
+        encoded = self.encode(queries, bos_token, eos_token)
         if self.device != "auto":
             encoded = encoded.to(self.device)
         query_ids = [
