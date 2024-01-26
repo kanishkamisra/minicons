@@ -175,6 +175,7 @@ query.conditional_score(["are", "is"])
 - **November 6, 2021:** MLM scoring has been fixed! You can now use `model.token_score()` and `model.sequence_score()` with `MaskedLMScorers` as well!
 - **June 4, 2022:** Added support for Seq2seq models. Thanks to [Aaron Mueller](https://github.com/aaronmueller) 🥳
 - **June 13, 2023:** Added support for `within_word_l2r`, a better way to do MLM scoring, thanks to Carina Kauf (https://github.com/carina-kauf) 🥳
+- **January, 2024:** minicons now supports mamba!
 
 ## Citation
 

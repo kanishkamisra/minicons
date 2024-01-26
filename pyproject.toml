@@ -1,8 +1,8 @@
 [tool.poetry]
 name = "minicons"
-version = "0.2.30"
+version = "0.2.33"
 description = "A package of useful functions to analyze transformer based language models."
-authors = ["Kanishka Misra <kmisra@purdue.edu>", "Aaron Mueller <amueller@jhu.edu>", "Carina Kauf <ckauf@mit.edu>"]
+authors = ["Kanishka Misra <kanishka.replies@gmail.com>", "Aaron Mueller <amueller@jhu.edu>", "Carina Kauf <ckauf@mit.edu>"]
 license = "MIT"
 readme = "README.md"
 homepage = "https://github.com/kanishkamisra/minicons"

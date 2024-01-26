@@ -24,6 +24,12 @@ from transformers import (
     AutoTokenizer,
     BatchEncoding,
 )
+
+try:
+    from mamba_ssm.models.mixer_seq_simple import MambaLMHeadModel
+except:
+    pass
+
 from transformers.utils.logging import set_verbosity_error
 
 from .utils import batch_wise_logprobs
@@ -55,7 +61,10 @@ class LMScorer:
         :param tokenizer: if provided, use this tokenizer.
         """
         if tokenizer is not None:
-            self.tokenizer = tokenizer
+            if isinstance(tokenizer, str):
+                self.tokenizer = AutoTokenizer.from_pretrained(tokenizer)
+            else:
+                self.tokenizer = tokenizer
         elif isinstance(model, str):
             self.tokenizer = AutoTokenizer.from_pretrained(model, use_fast=True)
         else:
@@ -1030,7 +1039,7 @@ class MaskedLMScorer(LMScorer):
                 res.append(list(zip(t, s)))
 
         return res
-    
+
     def conditional_score(
         self,
         prefix: Union[str, List[str]],
@@ -1068,7 +1077,7 @@ class MaskedLMScorer(LMScorer):
         reduced = list(map(reduction, logprob))
 
         return reduced
-    
+
     def partial_score(
         self,
         preamble: Union[str, List[str]],
@@ -1219,7 +1228,7 @@ class IncrementalLMScorer(LMScorer):
         encoded = self.tokenizer(text, return_tensors="pt", padding=True)
         if "token_type_ids" in encoded.keys():
             encoded.pop("token_type_ids")
-            
+
         return encoded
 
     def prepare_text(
@@ -1329,7 +1338,9 @@ class IncrementalLMScorer(LMScorer):
             outputs.append(sent_logits[-1])
         return torch.stack(outputs, 0)
 
-    def next_word_distribution(self, queries: List, bos_token=False, eos_token=False, surprisal: bool = False):
+    def next_word_distribution(
+        self, queries: List, bos_token=False, eos_token=False, surprisal: bool = False
+    ):
         """
         Returns the log probability distribution of the next word.
         """
@@ -2216,3 +2227,414 @@ class Seq2SeqScorer(LMScorer):
             # output = (sent_log_probs.sum(), sent_ids, sent_tokens)
             # outputs.append(output)
         return outputs
+
+
+class MambaScorer(LMScorer):
+    def __init__(
+        self,
+        model: Union[str, torch.nn.Module],
+        device: Optional[str] = "cuda",
+        tokenizer=None,
+        dtype=torch.float16,
+        **kwargs,
+    ) -> None:
+        super(MambaScorer, self).__init__(model, device=device, tokenizer=tokenizer)
+        if "cuda" not in device:
+            raise Exception("SSM models are only supported through GPUs")
+
+        if isinstance(tokenizer, str):
+            self.tokenizer = AutoTokenizer.from_pretrained(tokenizer)
+
+        try:
+            self.model = MambaLMHeadModel.from_pretrained(model, device=device, dtype=dtype)
+            self.model.eval()
+        except:
+            raise Exception("It seems you do not have mamba-ssm installed, please install it using `pip install mamba-ssm`, but remember that it only works with GPUs. If you do not have one, you cannot use a MambaScorer.")
+
+        # define CLS and SEP tokens
+        if self.tokenizer.pad_token is None:
+            if tokenizer is not None:
+                warnings.warn(
+                    "tokenizer is changed by adding pad_token_id to the tokenizer."
+                )
+            if self.tokenizer.eos_token is not None:
+                self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+            else:
+                self.tokenizer.add_special_tokens(
+                    {"additional_special_tokens": ["<pad>"]}
+                )
+                self.tokenizer.pad_token = "<pad>"
+                self.model.resize_token_embeddings(len(self.tokenizer))
+
+        if self.tokenizer.padding_side == "left":
+            self.tokenizer.padding_side = "right"
+
+        self.padding_side = self.tokenizer.padding_side
+
+    def encode(
+        self,
+        text: Union[str, List[str]],
+        bos_token: bool = False,
+        eos_token: bool = False,
+    ) -> BatchEncoding:
+        def _format(self, text, bos, eos):
+            if bos:
+                text = self.tokenizer.bos_token + text
+            if eos:
+                text = text + self.tokenizer.eos_token
+            return text
+
+        text = [text] if isinstance(text, str) else text
+        text = [_format(self, t, bos_token, eos_token) for t in text]
+        encoded = self.tokenizer(text, return_tensors="pt", padding=True)
+        if "token_type_ids" in encoded.keys():
+            encoded.pop("token_type_ids")
+
+        return encoded
+
+    def prepare_text(
+        self,
+        text: Union[str, List[str], BatchEncoding],
+        bos_token: bool = False,
+        eos_token: bool = False,
+    ) -> Tuple:
+        """
+        Prepares a batch of input text into a format fit to run LM
+        scoring on.
+
+        :param text: batch of sentences to be prepared for scoring.
+
+        :return: Batch of formatted input that can be passed to
+            ``compute_stats``
+        """
+        if isinstance(text, BatchEncoding):
+            encoded = text
+        else:
+            encoded = self.encode(text, bos_token, eos_token)
+        offsets = [0] * len(encoded["input_ids"])
+        return encoded, offsets
+
+    def prime_text(
+        self,
+        preamble: Union[str, List[str]],
+        stimuli: Union[str, List[str]],
+        separator=" ",
+        bos_token=False,
+        eos_token=False,
+    ) -> Tuple:
+        """
+        Prepares a batch of input text into a format fit to run LM
+        scoring on.
+
+        :param ``Union[str, List[str]]`` preamble: Batch of prefixes/prime/preambles on which the LM is conditioned.
+        :param ``Union[str, List[str]]`` stimuli: Batch of continuations that are scored based on the conditioned text (provided in the ``preamble``). The positions of the elements match their counterparts in the ``preamble``.
+
+        :return: Batch of formatted input that can be passed to
+            ``compute_stats``
+        """
+        preamble_text = [preamble] if isinstance(preamble, str) else preamble
+        preamble_encoded = self.tokenizer(preamble_text)["input_ids"]
+        preamble_lens = []
+        for preamble_tokens in preamble_encoded:
+            if bos_token:
+                restricted_id = float("inf")
+                bos_offset = 1
+            else:
+                restricted_id = self.tokenizer.pad_token_id
+                bos_offset = 0
+            preamble_lens.append(
+                len([token for token in preamble_tokens if token != restricted_id])
+                - 1
+                + bos_offset
+            )
+
+        sentences = (
+            [preamble + separator + stimuli]
+            if isinstance(preamble, str)
+            else [p + separator + s for p, s in list(zip(preamble, stimuli))]
+        )
+
+        return self.encode(sentences, bos_token, eos_token), preamble_lens
+
+    def distribution(self, batch: Iterable) -> torch.Tensor:
+        """
+        Returns a distribution over the vocabulary of the model.
+
+        :param `Iterable` batch: A batch of inputs fit to pass to a
+            transformer LM.
+
+        :return: Tensor consisting of log probabilies over vocab items.
+        """
+        batch, offsets = batch
+        ids = batch["input_ids"]
+        attention_masks = batch["attention_mask"]
+        if self.device != "auto":
+            ids = ids.to(self.device)
+            attention_masks = attention_masks.to(self.device)
+        nopad_mask = ids != self.tokenizer.pad_token_id
+
+        with torch.no_grad():
+            outputs = self.model(ids)
+            logits = outputs.logits
+            if "cuda" in self.device or "auto" in self.device:
+                logits.detach()
+
+        outputs = []
+        for sent_index in range(len(ids)):
+            sent_nopad_mask = nopad_mask[sent_index]
+            # len(tokens) = len(text[sent_index]) + 1
+            sent_tokens = [
+                tok
+                for i, tok in enumerate(batch.tokens(sent_index))
+                if sent_nopad_mask[i] and i > offsets[sent_index] + 1
+            ]
+
+            # sent_ids.shape = [len(text[sent_index]) + 1]
+            # ignore first token (<|eos|>)
+            sent_ids = ids[sent_index, sent_nopad_mask][1:]
+            # logits.shape = [len(text[sent_index]) + 1, vocab_size]
+            sent_logits = logits[sent_index, sent_nopad_mask][:-1, :]
+            sent_logits[:, self.tokenizer.pad_token_id] = float("-inf")
+
+            outputs.append(sent_logits[-1])
+        return torch.stack(outputs, 0)
+
+    def next_word_distribution(
+        self, queries: List, bos_token=False, eos_token=False, surprisal: bool = False
+    ):
+        """
+        Returns the log probability distribution of the next word.
+        """
+        encoded = self.encode(queries, bos_token, eos_token)
+        if self.device != "auto":
+            encoded = encoded.to(self.device)
+        query_ids = [
+            [j for j, i in enumerate(instance) if i != self.tokenizer.pad_token_id][-1]
+            for instance in encoded["input_ids"].tolist()
+        ]
+
+        logits = self.model(encoded.input_ids).logits.detach()
+        logits[:, :, self.tokenizer.pad_token_id] = float("-inf")
+
+        logits = logits[torch.arange(len(query_ids)), query_ids]
+        logprobs = logits - logits.logsumexp(1).unsqueeze(1)
+
+        if surprisal:
+            logprobs = -1.0 * logprobs
+
+        return logprobs
+
+    def compute_stats(
+        self,
+        batch: Iterable,
+        rank: bool = False,
+        prob: bool = False,
+        base_two: bool = False,
+        return_tensors: bool = False,
+    ) -> Union[Tuple[List[float], List[float]], List[float]]:
+        """
+        Primary computational method that processes a batch of prepared sentences and returns per-token scores for each sentence. By default, returns log-probabilities.
+
+        :param ``Iterable`` batch: batched input as processed by ``prepare_text`` or ``prime_text``.
+        :param ``bool`` rank: whether the model should also return ranks per word (based on the conditional log-probability of the word in context).
+        :param ``bool`` prob: whether the model should return probabilities instead of log-probabilities. Can only be `True` when `base_two` is `False`.
+        :param ``bool`` base_two: whether the base of the log should be 2 (usually preferred when reporting results in bits). Can only be `True` when `prob` is `False`.
+        :param ``bool`` return_tensors: whether the model should return scores as a list of tensors instead of a list of lists. This is important in some other convenient methods used in the package.
+
+        :return: Either a tuple of lists, each containing probabilities and ranks per token in each sentence passed in the input.
+        :rtype: ``Union[Tuple[List[float], List[int]], List[float]]``
+        """
+        assert not (
+            base_two and prob
+        ), "cannot both use base (which is for a log), and a probability measure at the same time!"
+
+        encoded, offsets = batch
+        if self.device != "auto":
+            encoded = encoded.to(self.device)
+
+        # ids = [
+        #     [i for i in instance if i != self.tokenizer.pad_token_id]
+        #     for instance in encoded["input_ids"].tolist()
+        # ]
+        ids = [
+            [i for i, am in zip(instance, attention_mask) if am != 0]
+            for instance, attention_mask in zip(
+                encoded["input_ids"].tolist(), encoded["attention_mask"].tolist()
+            )
+        ]
+
+        ## Ignore the probabilities of the first token.
+        effective_ids = [id[1:] for id in ids]
+
+        with torch.no_grad():
+            logits = self.model(encoded.input_ids).logits.detach()
+
+        # logits[:, :, self.tokenizer.pad_token_id] = float("-inf")
+
+        logits = logits.split([1] * len(offsets))
+
+        ## Set up storage variables
+        scores = []
+        if rank:
+            ranks = []
+
+        for logit, idx, offset in zip(logits, effective_ids, offsets):
+            length = len(idx)
+            logit = logit.squeeze(0)[torch.arange(offset, length),]
+
+            logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
+            query_ids = idx[offset:]
+            if base_two:
+                """
+                Log_2(X) = log_e(X)/log_e(2) (broadcasted)
+                """
+                score = (
+                    logprob_distribution[torch.arange(length - offset), query_ids]
+                    / torch.tensor(2).log()
+                ).tolist()
+            else:
+                if prob:
+                    score = (
+                        logprob_distribution[torch.arange(length - offset), query_ids]
+                        .exp()
+                        .tolist()
+                    )
+                else:
+                    score = logprob_distribution[
+                        torch.arange(length - offset), query_ids
+                    ].tolist()
+
+            if rank:
+                # shape = logprob_distribution.shape
+                """
+                Double argsort trick:
+                first argsort returns idxes of values that would return a sorted tensor,
+                second argsort returns ranks (0 indexed)
+
+                Proof: https://www.berkayantmen.com/rank.html
+
+                TODO: Try to implement ranking in linear time but across arbitrary dimensions:
+                https://stackoverflow.com/a/5284703
+                """
+                word_ranks = (-1.0 * logprob_distribution).argsort().argsort() + 1
+                # inv_ranks = logprob_distribution.argsort().argsort() + 1
+                # word_ranks = shape[1] - inv_ranks + 1
+                word_ranks = word_ranks[
+                    torch.arange(length - offset), query_ids
+                ].tolist()
+                ranks.append(word_ranks)
+
+            scores.append(score)
+
+        if return_tensors:
+            scores = [torch.tensor(l) for l in scores]
+
+        if rank:
+            return scores, ranks
+        else:
+            return scores
+
+    def sequence_score(
+        self, batch, reduction=lambda x: x.mean(0).item(), base_two=False, **kwargs
+    ):
+        """
+        TODO: reduction should be a string, if it's a function, specify what kind of function. --> how to ensure it is always that type?
+        """
+        tokenized = self.prepare_text(batch, **kwargs)
+        scores = self.compute_stats(
+            tokenized, rank=False, base_two=base_two, return_tensors=True
+        )
+        reduced = list(map(reduction, scores))
+        return reduced
+
+    def token_score(
+        self,
+        batch: Union[str, List[str]],
+        surprisal: bool = False,
+        prob: bool = False,
+        base_two: bool = False,
+        rank: bool = False,
+        decode: bool = True,
+        **kwargs,
+    ) -> Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]:
+        """
+        For every input sentence, returns a list of tuples in the following format:
+            `(token, score)`,
+
+        where score represents the log-probability (by default) of the token given context. Can also return ranks along with scores.
+
+        :param ``Union[str, List[str]]`` batch: a single sentence or a batch of sentences.
+        :param ``bool`` surprisal: If `True`, returns per-word surprisals instead of log-probabilities.
+        :param ``bool`` prob: If `True`, returns per-word probabilities instead of log-probabilities.
+        :param ``bool`` base_two: If `True`, uses log base 2 instead of natural-log (returns bits of values in case of surprisals)
+        :param ``bool`` rank: If `True`, also returns the rank of each word in context (based on the log-probability value)
+
+        :return: A `List` containing a `Tuple` consisting of the word, its associated score, and optionally, its rank.
+        :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
+        """
+
+        assert not (
+            surprisal and prob
+        ), "cannot both evaluate probability and surprisal at the same time!"
+        assert not (
+            base_two and prob
+        ), "cannot both use base (which is for a log), and a probability measure at the same time!"
+
+        tokenized = self.prepare_text(batch, **kwargs)
+        if rank:
+            scores, ranks = self.compute_stats(
+                tokenized, rank=rank, prob=prob, base_two=base_two, return_tensors=True
+            )
+        else:
+            scores = self.compute_stats(
+                tokenized, prob=prob, base_two=base_two, return_tensors=True
+            )
+
+        if surprisal:
+            scores = [-1.0 * s for s in scores]
+
+        scores = [s.tolist() for s in scores]
+
+        # indices = [
+        #     [i for i in indexed if i != self.tokenizer.pad_token_id]
+        #     for indexed in tokenized[0]["input_ids"].tolist()
+        # ]
+
+        indices = [
+            [i for i, am in zip(instance, attention_mask) if am != 0]
+            for instance, attention_mask in zip(
+                tokenized[0]["input_ids"].tolist(),
+                tokenized[0]["attention_mask"].tolist(),
+            )
+        ]
+        if decode:
+            tokens = [self.decode(idx) for idx in indices]
+        else:
+            tokens = [self.tokenizer.convert_ids_to_tokens(idx) for idx in indices]
+
+        if rank:
+            assert len(tokens) == len(scores) == len(ranks)
+        else:
+            assert len(tokens) == len(scores)
+
+        res = []
+        if rank:
+            for t, s, r in zip(tokens, scores, ranks):
+                if len(t) > len(s):
+                    diff = len(t) - len(s)
+                    sc = [0.0] * diff + s
+                    ra = [0] * diff + r
+                    res.append(list(zip(t, sc, ra)))
+                else:
+                    res.append(list(zip(t, sc, ra)))
+            # return [list(zip(t, s, r)) for t, s, r in zip(tokens, scores, ranks)]
+        else:
+            for t, s in zip(tokens, scores):
+                if len(t) > len(s):
+                    diff = len(t) - len(s)
+                    sc = [0.0] * diff + s
+                    res.append(list(zip(t, sc)))
+                else:
+                    res.append(list(zip(t, sc)))
+
+        return res
