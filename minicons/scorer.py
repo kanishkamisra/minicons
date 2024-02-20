@@ -1,4 +1,5 @@
 """Utilities for scoring sequences using Language Models."""
+
 from typing import (
     Iterable,
     Union,
@@ -99,9 +100,11 @@ class LMScorer:
         query_ids = [self.vocab[a] for a in queries]
         maxlen = max(map(len, query_ids))
         query_ids = [
-            q + [self.tokenizer.pad_token_id] * (maxlen - len(q))
-            if len(q) < maxlen
-            else q
+            (
+                q + [self.tokenizer.pad_token_id] * (maxlen - len(q))
+                if len(q) < maxlen
+                else q
+            )
             for q in query_ids
         ]
         current_batch_size = distribution.shape[0]
@@ -130,9 +133,7 @@ class LMScorer:
         )
         raise NotImplementedError
 
-    def compute_stats(
-        self, batch: Iterable, rank: bool = False
-    ) -> Union[
+    def compute_stats(self, batch: Iterable, rank: bool = False) -> Union[
         Tuple[List[float], List[int]],
         List[float],
         torch.Tensor,
@@ -500,7 +501,7 @@ class MaskedLMScorer(LMScorer):
         """
         sentences, words = self.mask(sentence_words)
 
-        encoded = self.tokenizer(sentences, return_tensors="pt")
+        encoded = self.tokenizer(sentences, return_tensors="pt", padding=True)
 
         if self.device != "auto":
             encoded = encoded.to(self.device)
@@ -580,14 +581,16 @@ class MaskedLMScorer(LMScorer):
 
                 mask_indices = [
                     # mask the target token and all following tokens which belong to the same word
-                    [mask_pos]
-                    + [
-                        j
-                        for j in range(mask_pos + 1, target_token_indices[-1] + 1)
-                        if word_ids[j] == word_ids[mask_pos]
-                    ]
-                    if word_ids[mask_pos] is not None
-                    else [mask_pos]  # mask this token
+                    (
+                        [mask_pos]
+                        + [
+                            j
+                            for j in range(mask_pos + 1, target_token_indices[-1] + 1)
+                            if word_ids[j] == word_ids[mask_pos]
+                        ]
+                        if word_ids[mask_pos] is not None
+                        else [mask_pos]
+                    )  # mask this token
                     for mask_pos in target_token_indices
                 ]
 
@@ -2246,10 +2249,14 @@ class MambaScorer(LMScorer):
             self.tokenizer = AutoTokenizer.from_pretrained(tokenizer)
 
         try:
-            self.model = MambaLMHeadModel.from_pretrained(model, device=device, dtype=dtype)
+            self.model = MambaLMHeadModel.from_pretrained(
+                model, device=device, dtype=dtype
+            )
             self.model.eval()
         except:
-            raise Exception("It seems you do not have mamba-ssm installed, please install it using `pip install mamba-ssm`, but remember that it only works with GPUs. If you do not have one, you cannot use a MambaScorer.")
+            raise Exception(
+                "It seems you do not have mamba-ssm installed, please install it using `pip install mamba-ssm`, but remember that it only works with GPUs. If you do not have one, you cannot use a MambaScorer."
+            )
 
         # define CLS and SEP tokens
         if self.tokenizer.pad_token is None:
