@@ -18,6 +18,7 @@ import warnings
 from collections import defaultdict
 from itertools import chain
 from re import sub
+import numpy as np
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForMaskedLM,
@@ -485,7 +486,8 @@ class MaskedLMScorer(LMScorer):
         return (sentences, words)
 
     def cloze(
-        self, sentence_words: Union[Tuple[str, str], List[Tuple[str, str]]]
+        self, sentence_words: Union[Tuple[str, str], List[Tuple[str, str]]],
+        PLL_metric: Optional[str] = None
     ) -> torch.Tensor:
         """
         Runs inference on masked input.
@@ -499,36 +501,64 @@ class MaskedLMScorer(LMScorer):
         :return: A tensor with log probabilities for the desired word
             in context
         """
-        sentences, words = self.mask(sentence_words)
-
+        sentences = list(map(lambda x: x[0], sentence_words))
         encoded = self.tokenizer(sentences, return_tensors="pt", padding=True)
+        targets_start = []
+        targets_end = []
+
+        # Iterating over sentence-target word pairs
+        for batch_index, (sentence, word) in enumerate(sentence_words):
+            word_ids = encoded.word_ids(batch_index=batch_index)
+            # Iterating over all words in the sentence
+            for word_id in set(word_ids):
+                # Ignoring special tokens
+                if word_id is None:
+                    continue
+                # Finding all tokens corresponding to the chosen word
+                indices = np.where(list(map(lambda x: x == word_id, word_ids)))[0]
+                tokens = encoded["input_ids"][batch_index][indices]
+                # Checking if the chosen word matches the target word
+                if torch.equal(tokens,
+                               self.tokenizer(word, return_tensors="pt", add_special_tokens=False)["input_ids"][0]):
+                    targets_start.append(indices[0])
+                    targets_end.append(indices[-1] + 1)
 
         if self.device != "auto":
             encoded = encoded.to(self.device)
 
-        idx = torch.nonzero(
-            encoded["input_ids"] == self.tokenizer.mask_token_id, as_tuple=False
-        )[:, 1].unsqueeze(1)
-        word_idx = self.tokenizer(words, add_special_tokens=False)["input_ids"]
-        with torch.no_grad():
-            masked_logits = (
-                self.model(**encoded)
-                .logits[torch.arange(len(sentences))[:, None], idx]
-                .squeeze()
-                .detach()
-            )
-            if len(sentences) > 1:
-                logprobs = masked_logits - masked_logits.logsumexp(1).unsqueeze(1)
-                masked_logprobs = (
-                    logprobs[torch.arange(len(sentences))[:, None], word_idx]
-                    .exp()
-                    .squeeze()
-                )
-            else:
-                logprobs = masked_logits - masked_logits.logsumexp(0)
-                masked_logprobs = logprobs[word_idx].exp().squeeze()
+        masked_tensors = self.get_masked_tensors(
+            encoded,
+            PLL_metric=PLL_metric,
+            targets_start=targets_start,
+            targets_end=targets_end,
+        )
 
-        return masked_logprobs
+        target_probs = []
+
+        with torch.no_grad():
+            for masked_tensor, attn_mask, token_ids, token_indices in masked_tensors:
+                masked_logits = (
+                    self.model(input_ids=masked_tensor, attention_mask=attn_mask)
+                    .logits[torch.arange(len(token_indices)), token_indices]
+                    .squeeze()
+                    .detach()
+                )
+
+                if len(token_indices) > 1:
+                    logprobs = masked_logits - masked_logits.logsumexp(1).unsqueeze(1)
+                    target_prob = (
+                        logprobs[torch.arange(len(token_indices)), token_ids]
+                        .squeeze()
+                        .sum()
+                        .exp()
+                    )
+                else:
+                    logprobs = masked_logits - masked_logits.logsumexp(0)
+                    target_prob = logprobs[token_ids].squeeze().sum().exp()
+
+                target_probs.append(target_prob)
+        
+        return torch.stack(target_probs)
 
     def get_masked_tensors(
         self,
