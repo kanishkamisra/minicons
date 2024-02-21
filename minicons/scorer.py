@@ -595,8 +595,8 @@ class MaskedLMScorer(LMScorer):
         for batch_index, (token_ids, attention_mask) in enumerate(
             zip(encoded["input_ids"], encoded["attention_mask"])
         ):
-            token_ids = torch.tensor(token_ids)
-            attention_mask = torch.tensor(attention_mask)
+            token_ids = torch.as_tensor(token_ids)
+            attention_mask = torch.as_tensor(attention_mask)
 
             target_token_indices: List[int] = []
             target_token_ids: List[torch.Tensor] = []
