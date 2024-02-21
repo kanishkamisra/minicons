@@ -167,7 +167,7 @@ query.conditional_score(["are", "is"])
 
 ## Tutorials
 
-- [Introduction to using LM-scoring methods using minicons](https://kanishka.xyz/post/minicons-running-large-scale-behavioral-analyses-on-transformer-lms/)
+- [Introduction to using LM-scoring methods using minicons](https://kanishka.website/post/minicons-running-large-scale-behavioral-analyses-on-transformer-lms/)
 - [Computing sentence and token surprisals using minicons](examples/surprisals.md)
 - [Extracting word/phrase representations using minicons](examples/word_representations.md)
 
