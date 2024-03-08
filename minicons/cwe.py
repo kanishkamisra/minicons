@@ -29,7 +29,7 @@ class CWE(object):
     """
 
     def __init__(
-        self, model_name: str, device: Optional[str] = "cpu", pretrained: bool = True
+        self, model_name: str, device: Optional[str] = "cpu", pretrained: bool = True, **kwargs
     ) -> None:
         """
         :param model_name: name of the model, should either be a path
@@ -44,15 +44,16 @@ class CWE(object):
         :type pretrained: bool
         """
         self.device = device
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True, **kwargs)
         self.pretrained = pretrained
+        self.model_name = model_name
         if pretrained:
             self.model = AutoModel.from_pretrained(
-                model_name, return_dict=True, output_hidden_states=True
+                model_name, return_dict=True, output_hidden_states=True, **kwargs
             )
         else:
             self.config = AutoConfig.from_pretrained(
-                model_name, return_dict=True, output_hidden_states=True
+                model_name, return_dict=True, output_hidden_states=True, **kwargs
             )
             self.model = AutoModel.from_config(self.config)
         self.dimensions = list(self.model.parameters())[-1].shape[0]
@@ -182,6 +183,12 @@ class CWE(object):
         search_queries = []
         for s, idx in sentences:
             if 0 in idx:
+                search_queries.append(
+                    self.tokenizer.encode_plus(
+                        f"{s[idx[0]:idx[1]]}", add_special_tokens=False
+                    )["input_ids"]
+                )
+            elif 'llama' in self.model_name: ## Seems like the GPT2 approach really fails w Llama's tokenizer
                 search_queries.append(
                     self.tokenizer.encode_plus(
                         f"{s[idx[0]:idx[1]]}", add_special_tokens=False
