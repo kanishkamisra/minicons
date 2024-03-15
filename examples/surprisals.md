@@ -161,7 +161,7 @@ for batch in stimuli_dl:
 # Testing the extent to which GPT2-small shows patterns of number-agreement:
 print(np.mean([g > b for g,b in zip(good_scores, bad_scores)]))
 
-# 0.804
+# 0.89
 ```
 
 ## Sidenote: Computing conditional log-probabilities

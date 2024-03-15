@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "minicons"
-version = "0.2.37"
+version = "0.2.38"
 description = "A package of useful functions to analyze transformer based language models."
 authors = ["Kanishka Misra <kanishka.replies@gmail.com>", "Aaron Mueller <amueller@jhu.edu>", "Carina Kauf <ckauf@mit.edu>", "Maria Ryskina <ryskina@mit.edu>"]
 license = "MIT"
@@ -15,7 +15,7 @@ minicons = 'minicons.bin.score_cli:process'
 [tool.poetry.dependencies]
 python = ">=3.8.0,<4"
 transformers = "^4.30.0"
-accelerate= "^0.24.0"
+accelerate= "^0.25.0"
 torch = "^2.0.0"
 urllib3 = "^1.26.7"
 pandas = "^1.3.5"
