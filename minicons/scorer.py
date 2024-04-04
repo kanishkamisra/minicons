@@ -411,12 +411,13 @@ class MaskedLMScorer(LMScorer):
         super(MaskedLMScorer, self).__init__(model, device=device, tokenizer=tokenizer)
 
         if isinstance(model, str):
-            self.model = AutoModelForMaskedLM.from_pretrained(
-                model, return_dict=True, **kwargs
-            )
             if self.device == "auto":
                 self.model = AutoModelForMaskedLM.from_pretrained(
                     model, device_map=self.device, return_dict=True, **kwargs
+                )
+            else:
+                self.model = AutoModelForMaskedLM.from_pretrained(
+                    model, return_dict=True, **kwargs
                 )
             # self.model.to(self.device)
         else:
@@ -1198,12 +1199,13 @@ class IncrementalLMScorer(LMScorer):
         )
 
         if isinstance(model, str):
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model, return_dict=True, **kwargs
-            )
             if self.device == "auto":
                 self.model = AutoModelForCausalLM.from_pretrained(
                     model, device_map=self.device, return_dict=True, **kwargs
+                )
+            else:
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    model, return_dict=True, **kwargs
                 )
         else:
             self.model = model
@@ -2706,11 +2708,12 @@ class VLMScorer(LMScorer):
         super(VLMScorer, self).__init__(model, device=device, tokenizer=tokenizer)
         if isinstance(model, str):
             self.tokenizer = AutoProcessor.from_pretrained(model)
-            self.model = AutoModelForVision2Seq.from_pretrained(model, **kwargs)
             if self.device == "auto":
                 self.model = AutoModelForVision2Seq.from_pretrained(
                     model, device_map=self.device, **kwargs
                 )
+            else:
+                self.model = AutoModelForVision2Seq.from_pretrained(model, **kwargs)
         else:
             self.model = model
 
