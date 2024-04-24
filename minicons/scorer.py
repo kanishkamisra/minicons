@@ -26,7 +26,7 @@ from transformers import (
     AutoTokenizer,
     BatchEncoding,
     AutoProcessor,
-    AutoModelForVision2Seq
+    AutoModelForVision2Seq,
 )
 
 from PIL import Image
@@ -491,9 +491,10 @@ class MaskedLMScorer(LMScorer):
         return (sentences, words)
 
     def cloze(
-        self, sentence_words: Union[Tuple[str, str], List[Tuple[str, str]]],
+        self,
+        sentence_words: Union[Tuple[str, str], List[Tuple[str, str]]],
         PLL_metric: Optional[str] = None,
-        probs: Optional[bool] = False
+        probs: Optional[bool] = False,
     ) -> List[float]:
         """
         Runs inference on masked input.
@@ -519,7 +520,9 @@ class MaskedLMScorer(LMScorer):
 
         # Iterating over sentence-target word pairs
         for batch_index, (sentence, word) in enumerate(sentence_words):
-            desired_tokens = self.tokenizer(word, return_tensors="pt", add_special_tokens=False)["input_ids"][0]
+            desired_tokens = self.tokenizer(
+                word, return_tensors="pt", add_special_tokens=False
+            )["input_ids"][0]
             if PLL_metric == "within_word_l2r":
                 start_idx = None
                 word_ids = encoded.word_ids(batch_index=batch_index)
@@ -538,11 +541,20 @@ class MaskedLMScorer(LMScorer):
                     targets_start.append(start_idx)
                     targets_end.append(start_idx + len(desired_tokens))
                 else:
-                    raise ValueError(f"Word ``{word}'' not found in sentence ``{sentence}''. PLL=within_word_l2r won't work if ``{word}'' is a subword or multiple words.")
+                    raise ValueError(
+                        f"Word ``{word}'' not found in sentence ``{sentence}''. PLL=within_word_l2r won't work if ``{word}'' is a subword or multiple words."
+                    )
             else:
-                for start_idx in range(len(encoded["input_ids"][batch_index]) - len(desired_tokens)):
+                for start_idx in range(
+                    len(encoded["input_ids"][batch_index]) - len(desired_tokens)
+                ):
                     # Checking if the chosen sequence of tokens matches the target sequence of tokens
-                    if torch.equal(encoded["input_ids"][batch_index][start_idx:len(desired_tokens)+start_idx], desired_tokens):
+                    if torch.equal(
+                        encoded["input_ids"][batch_index][
+                            start_idx : len(desired_tokens) + start_idx
+                        ],
+                        desired_tokens,
+                    ):
                         targets_start.append(start_idx)
                         targets_end.append(start_idx + len(desired_tokens))
 
@@ -583,7 +595,7 @@ class MaskedLMScorer(LMScorer):
         target_probs_tensor = torch.tensor(target_prob_list)
         if probs:
             target_probs_tensor = target_probs_tensor.exp()
-        
+
         return target_probs_tensor.tolist()
 
     def get_masked_tensors(
@@ -1843,6 +1855,10 @@ class Seq2SeqScorer(LMScorer):
                 self.model.to(self.device)
             self.model.eval()
 
+        self.decoder_start_token = self.tokenizer.convert_ids_to_tokens(
+            self.model.config.decoder_start_token_id
+        )
+
     def add_special_tokens(self, text: Union[str, List[str]]) -> Union[str, List[str]]:
         """
         Reformats input text to add special model-dependent tokens.
@@ -1881,8 +1897,213 @@ class Seq2SeqScorer(LMScorer):
         offsets = [0] * len(encoded["input_ids"])
         return encoded, offsets
 
-    def prime_text(
-        self, preamble: Union[str, List[str]], stimuli: Union[str, List[str]]
+    def prime_text(self, prefix: Union[str, List[str]], stimuli: Union[str, List[str]]):
+
+        stimuli = [f"{self.decoder_start_token} {s}" for s in stimuli]
+
+        prefix_encoded = self.tokenizer(
+            prefix, return_tensors="pt", padding=True, add_special_tokens=False
+        )
+        stimuli_encoded = self.tokenizer(
+            stimuli, return_tensors="pt", padding=True, add_special_tokens=False
+        )
+        offset = [0] * len(prefix_encoded["input_ids"])  # this will be ignored anyway
+
+        return prefix_encoded, stimuli_encoded, offset
+
+    def compute_conditional_stats(
+        self,
+        batch: Iterable,
+        rank: bool = False,
+        prob: bool = False,
+        base_two: bool = False,
+        return_tensors: bool = False,
+    ):
+        assert not (
+            base_two and prob
+        ), "cannot both use base (which is for a log), and a probability measure at the same time!"
+
+        prefix, stimuli, offsets = batch
+
+        if self.device != "auto":
+            prefix = prefix.to(self.device)
+            stimuli = stimuli.to(self.device)
+
+        ids = [
+            [i for i, am in zip(instance, attention_mask) if am != 0]
+            for instance, attention_mask in zip(
+                stimuli["input_ids"].tolist(), stimuli["attention_mask"].tolist()
+            )
+        ]
+
+        # Ignore the probabilities of the first token.
+        effective_ids = [id[1:] for id in ids]
+
+        with torch.no_grad():
+            logits = self.model(
+                **prefix, decoder_input_ids=stimuli["input_ids"]
+            ).logits.detach()
+
+        scores = []
+        if rank:
+            ranks = []
+
+        for logit, idx, offset in zip(logits, effective_ids, offsets):
+            length = len(idx)
+            logit = logit.squeeze(0)[torch.arange(offset, length),]
+
+            logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
+            query_ids = idx[offset:]
+            if base_two:
+                """
+                Log_2(X) = log_e(X)/log_e(2) (broadcasted)
+                """
+                score = (
+                    logprob_distribution[torch.arange(length - offset), query_ids]
+                    / torch.tensor(2).log()
+                ).tolist()
+            else:
+                if prob:
+                    score = (
+                        logprob_distribution[torch.arange(length - offset), query_ids]
+                        .exp()
+                        .tolist()
+                    )
+                else:
+                    score = logprob_distribution[
+                        torch.arange(length - offset), query_ids
+                    ].tolist()
+
+            if rank:
+                # shape = logprob_distribution.shape
+                """
+                Double argsort trick:
+                first argsort returns idxes of values that would return a sorted tensor,
+                second argsort returns ranks (0 indexed)
+
+                Proof: https://www.berkayantmen.com/rank.html
+
+                TODO: Try to implement ranking in linear time but across arbitrary dimensions:
+                https://stackoverflow.com/a/5284703
+                """
+                word_ranks = (-1.0 * logprob_distribution).argsort().argsort() + 1
+                # inv_ranks = logprob_distribution.argsort().argsort() + 1
+                # word_ranks = shape[1] - inv_ranks + 1
+                word_ranks = word_ranks[
+                    torch.arange(length - offset), query_ids
+                ].tolist()
+                ranks.append(word_ranks)
+
+            scores.append(score)
+
+        if return_tensors:
+            scores = [torch.tensor(l) for l in scores]
+
+        if rank:
+            return scores, ranks
+        else:
+            return scores
+
+    def conditional_score(
+        self,
+        prefix: Union[str, List[str]],
+        stimuli: Union[str, List[str]],
+        reduction: Callable = lambda x: x.mean(0).item(),
+        prob: bool = False,
+        base_two: bool = False,
+    ):
+        primed = self.prime_text(prefix, stimuli)
+
+        result = self.compute_conditional_stats(
+            primed, rank=False, base_two=base_two, prob=prob, return_tensors=True
+        )
+        logprob = result
+        reduced = list(map(reduction, logprob))
+
+        return reduced
+
+    def conditional_token_score(
+        self,
+        prefix: Union[str, List[str]],
+        stimuli: Union[str, List[str]],
+        surprisal: bool = False,
+        prob: bool = False,
+        base_two: bool = False,
+        rank: bool = False,
+        decode: bool = True,
+    ):
+        assert not (
+            surprisal and prob
+        ), "cannot both evaluate probability and surprisal at the same time!"
+        assert not (
+            base_two and prob
+        ), "cannot both use base (which is for a log), and a probability measure at the same time!"
+
+        # tokenized = self.prepare_text(batch, **kwargs)
+        tokenized = self.prime_text(prefix, stimuli)
+        if rank:
+            scores, ranks = self.compute_conditional_stats(
+                tokenized, rank=rank, prob=prob, base_two=base_two, return_tensors=True
+            )
+        else:
+            scores = self.compute_conditional_stats(
+                tokenized, prob=prob, base_two=base_two, return_tensors=True
+            )
+
+        if surprisal:
+            scores = [-1.0 * s for s in scores]
+
+        scores = [s.tolist() for s in scores]
+
+        # indices = [
+        #     [i for i in indexed if i != self.tokenizer.pad_token_id]
+        #     for indexed in tokenized[0]["input_ids"].tolist()
+        # ]
+
+        indices = [
+            [i for i, am in zip(instance, attention_mask) if am != 0]
+            for instance, attention_mask in zip(
+                tokenized[1]["input_ids"].tolist(),
+                tokenized[1]["attention_mask"].tolist(),
+            )
+        ]
+        if decode:
+            tokens = [self.decode(idx) for idx in indices]
+        else:
+            tokens = [self.tokenizer.convert_ids_to_tokens(idx) for idx in indices]
+
+        if rank:
+            assert len(tokens) == len(scores) == len(ranks)
+        else:
+            assert len(tokens) == len(scores)
+
+        res = []
+        if rank:
+            for t, s, r in zip(tokens, scores, ranks):
+                if len(t) > len(s):
+                    diff = len(t) - len(s)
+                    sc = [0.0] * diff + s
+                    ra = [0] * diff + r
+                    res.append(list(zip(t, sc, ra)))
+                else:
+                    res.append(list(zip(t, sc, ra)))
+            # return [list(zip(t, s, r)) for t, s, r in zip(tokens, scores, ranks)]
+        else:
+            for t, s in zip(tokens, scores):
+                if len(t) > len(s):
+                    diff = len(t) - len(s)
+                    sc = [0.0] * diff + s
+                    res.append(list(zip(t, sc)))
+                else:
+                    res.append(list(zip(t, sc)))
+
+        return res
+
+    def prime_text_deprecated(
+        self,
+        preamble: Union[str, List[str]],
+        stimuli: Union[str, List[str]],
+        separator=" ",
     ) -> Tuple:
         """
         Prepares a batch of input text into a format fit to run LM
@@ -2005,6 +2226,9 @@ class Seq2SeqScorer(LMScorer):
         :return: Either a tuple of lists, each containing probabilities and ranks per token in each sentence passed in the input.
         :rtype: ``Union[Tuple[List[float], List[int]], List[float]]``
         """
+        raise Exception(
+            "This function is currently erroneous and a fix is in progress. Apologies for the inconvenience."
+        )
         assert not (
             base_two and prob
         ), "cannot both use base (which is for a log), and a probability measure at the same time!"
@@ -2107,6 +2331,9 @@ class Seq2SeqScorer(LMScorer):
         """
         TODO: reduction should be a string, if it's a function, specify what kind of function. --> how to ensure it is always that type?
         """
+        raise Exception(
+            "This function is currently erroneous and a fix is in progress. Apologies for the inconvenience."
+        )
         if source is not None:
             assert len(source) == len(batch)
             source_format = "custom"
@@ -2148,7 +2375,9 @@ class Seq2SeqScorer(LMScorer):
         :return: A `List` containing a `Tuple` consisting of the word, its associated score, and optionally, its rank.
         :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
         """
-
+        raise Exception(
+            "This function is currently erroneous and a fix is in progress. Apologies for the inconvenience."
+        )
         assert not (
             surprisal and prob
         ), "cannot both evaluate probability and surprisal at the same time!"
@@ -2702,7 +2931,8 @@ class MambaScorer(LMScorer):
                     res.append(list(zip(t, sc)))
 
         return res
-    
+
+
 class VLMScorer(LMScorer):
     def __init__(self, model, device, tokenizer=None, **kwargs):
         super(VLMScorer, self).__init__(model, device=device, tokenizer=tokenizer)
@@ -2824,7 +3054,9 @@ class VLMScorer(LMScorer):
             ``compute_stats``
         """
         preamble_text = [preamble] if isinstance(preamble, str) else preamble
-        preamble_encoded = self.tokenizer(text=preamble_text, images=image, padding=True)["input_ids"]
+        preamble_encoded = self.tokenizer(
+            text=preamble_text, images=image, padding=True
+        )["input_ids"]
         preamble_lens = []
         for preamble_tokens in preamble_encoded:
             restricted_id = self.pad_token_id
@@ -3094,41 +3326,41 @@ class VLMScorer(LMScorer):
                     res.append(list(zip(t, sc)))
 
         return res
-    
+
     def conditional_score(
-            self,
-            prefix: Union[str, List[str]],
-            stimuli: Union[str, List[str]],
-            image = None,
-            separator: str = " ",
-            reduction: Callable = lambda x: x.mean(0).item(),
-            prob: bool = False,
-            base_two: bool = False,
-            **kw,
-        ) -> List[float]:
-            """
-            Pooled estimates of sequence log probabilities (or some modification of it), given a prefix. Pooling is usually done using a function that is passed to the method.
+        self,
+        prefix: Union[str, List[str]],
+        stimuli: Union[str, List[str]],
+        image=None,
+        separator: str = " ",
+        reduction: Callable = lambda x: x.mean(0).item(),
+        prob: bool = False,
+        base_two: bool = False,
+        **kw,
+    ) -> List[float]:
+        """
+        Pooled estimates of sequence log probabilities (or some modification of it), given a prefix. Pooling is usually done using a function that is passed to the method.
 
-            :param prefix: a batch of prefixes or primes passed to the
-                language model. This is what the sequence is conditioned on, and the model ignores the word probabilities of this part of the input in estimating the overall score.
-            :type prefix: ``Union[str, List[str]]``
-            :param stimuli: a batch of sequences (same length as prefix)
-                that form the main input consisting of the sequence whose
-                score you want to calculate.
-            :type stimuli: ``Union[str, List[str]]``
-            :param reduction: Reduction function, is selected to be
-                ``lambda x: x.mean(0).item()`` by default, which stands for the avg. log-probability per token for each sequence in the batch.
-            :type reduction: Callable
-            :param kw: model-specific keyword arguments to pass to the `prepare_text` function
-            :return: List of floats specifying the desired score for the stimuli part of the input, e.g., P(stimuli | preamble).
-            :rtype: ``List[float]``
-            """
-            primed = self.prime_text(prefix, stimuli, image, separator, **kw)
+        :param prefix: a batch of prefixes or primes passed to the
+            language model. This is what the sequence is conditioned on, and the model ignores the word probabilities of this part of the input in estimating the overall score.
+        :type prefix: ``Union[str, List[str]]``
+        :param stimuli: a batch of sequences (same length as prefix)
+            that form the main input consisting of the sequence whose
+            score you want to calculate.
+        :type stimuli: ``Union[str, List[str]]``
+        :param reduction: Reduction function, is selected to be
+            ``lambda x: x.mean(0).item()`` by default, which stands for the avg. log-probability per token for each sequence in the batch.
+        :type reduction: Callable
+        :param kw: model-specific keyword arguments to pass to the `prepare_text` function
+        :return: List of floats specifying the desired score for the stimuli part of the input, e.g., P(stimuli | preamble).
+        :rtype: ``List[float]``
+        """
+        primed = self.prime_text(prefix, stimuli, image, separator, **kw)
 
-            result = self.compute_stats(
-                primed, rank=False, base_two=base_two, prob=prob, return_tensors=True
-            )
-            logprob = result
-            reduced = list(map(reduction, logprob))
+        result = self.compute_stats(
+            primed, rank=False, base_two=base_two, prob=prob, return_tensors=True
+        )
+        logprob = result
+        reduced = list(map(reduction, logprob))
 
-            return reduced
+        return reduced
