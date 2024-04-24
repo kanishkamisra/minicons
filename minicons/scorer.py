@@ -1899,6 +1899,9 @@ class Seq2SeqScorer(LMScorer):
 
     def prime_text(self, prefix: Union[str, List[str]], stimuli: Union[str, List[str]]):
 
+        prefix = [prefix] if isinstance(prefix, str) else prefix
+        stimuli = [stimuli] if isinstance(stimuli, str) else stimuli
+
         stimuli = [f"{self.decoder_start_token} {s}" for s in stimuli]
 
         prefix_encoded = self.tokenizer(
