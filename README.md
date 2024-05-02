@@ -147,9 +147,9 @@ print(mlm_model.token_score(stimuli, PLL_metric='original'))
 '''
 ```
 
-## NEW: Vision-Language Model (VLM) SCORING
+## NEW: Vision-Language Model (VLM) Scoring
 
-Minicons now supports VLM scoring! The following code demonstrates how one can extract log-probs of text from Salesforce's BLIP-2 model.
+Minicons now supports VLM scoring! The following code demonstrates how one can extract log-probs of caption/descriptions from Salesforce's BLIP-2 model, conditioned on a batch of images:
 
 <img align="right" src="assets/vlminicons.png" width="350px">
 
