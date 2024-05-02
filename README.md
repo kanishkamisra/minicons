@@ -51,14 +51,13 @@ tensor([[-0.0895,  0.0758,  0.0753,  ...,  0.0130, -0.1093, -0.2354],
 '''
 ```
 
-2. Compute sentence acceptability measures (surprisals) using Word Prediction Models:
+2. Compute sentence acceptability measures (surprisals) using Language Models:
 
 ```py
 from minicons import scorer
 
 mlm_model = scorer.MaskedLMScorer('bert-base-uncased', 'cpu')
 ilm_model = scorer.IncrementalLMScorer('distilgpt2', 'cpu')
-s2s_model = scorer.Seq2SeqScorer('t5-base', 'cpu')
 
 stimuli = ["The keys to the cabinet are on the table.",
            "The keys to the cabinet is on the table."]
@@ -81,15 +80,31 @@ print(mlm_model.sequence_score(stimuli, reduction = lambda x: -x.sum(0).item()))
 '''
 [13.962685585021973, 23.415111541748047]
 '''
+```
 
-# Seq2seq scoring
-## Blank source sequence, target sequence specified in `stimuli`
-print(s2s_model.sequence_score(stimuli, source_format = 'blank'))
-## Source sequence is the same as the target sequence in `stimuli`
-print(s2s_model.sequence_score(stimuli, source_format = 'copy'))
-'''
-[-7.910910129547119, -7.835635185241699]
-[-10.555519104003906, -9.532546997070312]
+3. Computing conditional sequence scoring using LMs
+
+
+```py
+s2s_model = scorer.Seq2SeqScorer('t5-base', 'cpu')
+
+# sequence scoring for batch of input, output, by default = logprobs, can change to other quantities as needed (see minicons readme)
+s2s_model.conditional_score(["What is the capital of France?", "What is the capital of France?"], ["Paris.", "Lyon."]) # the same thing works with ilm_model and mlm_model as well
+
+'''OUTPUT:
+[-6.089522838592529, -8.20227336883545]
+''' 
+
+# Token-wise score of the output queries: -- <pad> token is given a score of 0.0, pass rank=True to also give token ranks
+s2s_model.conditional_token_score(["What is the capital of France?", "What is the capital of France?"], ["Paris.", "Lyon."], rank=True) 
+
+'''OUTPUT:
+[[('<pad>', 0.0, 0),
+  ('Paris', -7.5618486404418945, 168),
+  ('.', -4.617197036743164, 11)],
+ [('<pad>', 0.0, 0),
+  ('Lyon', -12.044157981872559, 3459),
+  ('.', -4.36038875579834, 8)]]
 '''
 ```
 
@@ -132,7 +147,42 @@ print(mlm_model.token_score(stimuli, PLL_metric='original'))
 '''
 ```
 
+## NEW: Vision-Language Model (VLM) SCORING
+
+Minicons now supports VLM scoring! The following code demonstrates how one can extract log-probs of text from Salesforce's BLIP-2 model.
+
+<img align="right" src="assets/vlminicons.png" width="350px">
+
+
+```py
+from minicons import scorer
+from PIL import Image
+
+# top image
+penguin = Image.open('penguin.jpg')
+
+# bottom image
+cardinal = Image.open('cardinal.jpg')
+
+lm = scorer.VLMScorer(
+  "Salesforce/blip2-opt-2.7b", 
+  device="cuda:0"
+)
+
+lm.sequence_score(
+  text_batch=["This bird can fly."] * 2, 
+  image_batch=[penguin, cardinal]
+)
+
+#> logprobs of penguin vs cardinal -> can fly
+#> [-5.644123077392578, -5.129026889801025]
+```
+
 ## OpenAI API
+
+> [!CAUTION]
+> THIS IS NOW DEPRECATED BECAUSE OPEN-AI NO LONGER MAKES INPUT LOGPROBS AVAILABLE!**
+
 Some models on the OpenAI API also allow for querying of log-probs (for now), and minicons now (as of Sept 29) also supports it! Here's how:
 
 First, make sure you save your OpenAI API Key in some file (say `~/.openaikey`). Register the key using:
