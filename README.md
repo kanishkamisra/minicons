@@ -17,7 +17,9 @@ Install from Pypi using:
 ## Supported Functionality
 
 - Extract word representations from Contextualized Word Embeddings
-- Score sequences using language model scoring techniques, including masked language models following [Salazar et al. (2020)](https://www.aclweb.org/anthology/2020.acl-main.240.pdf).
+- Score sequences using language model scoring techniques, including masked language models following [Salazar et al. (2020)](https://www.aclweb.org/anthology/2020.acl-main.240.pdf), and state space models (such as Mamba).
+- Score sequences using VLM models (see below)
+- Do scoring in a quantized, multi-gpu setting.
 
 
 ## Examples
