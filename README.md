@@ -252,3 +252,12 @@ If you use Kauf and Ivanova's PLL scoring technique, please additionally also ci
   year={2023}
 }
 ```
+
+## Famous users of minicons:
+
+A non-exhaustive but fun list of ppl:
+
+* Adele Goldberg
+* Chris Potts
+* Najoung Kim
+
