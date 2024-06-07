@@ -260,4 +260,6 @@ A non-exhaustive but fun list of ppl:
 * Adele Goldberg
 * Chris Potts
 * Najoung Kim
+* Forrest Davis
+* Valentina Pyatkin
 
