@@ -265,7 +265,7 @@ A non-exhaustive but fun list of ppl:
 * Valentina Pyatkin
 * Aaron Mueller
 * Sanghee Kim
-* Venkata Govindaraju
+* Venkata Govindarajan
 * Kyle Mahowald
 * Carina Kauf
 
