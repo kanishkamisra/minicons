@@ -263,4 +263,9 @@ A non-exhaustive but fun list of ppl:
 * Forrest Davis
 * Marten van Schijndel
 * Valentina Pyatkin
+* Aaron Mueller
+* Sanghee Kim
+* Venkata Govindaraju
+* Kyle Mahowald
+* Carina Kauf
 
