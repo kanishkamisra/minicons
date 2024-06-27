@@ -1,7 +1,7 @@
 """Utilities to extract contextual word embeddings from Language Models."""
 from typing import Union, List, Optional, Tuple
 
-from .utils import find_pattern, character_span
+from .utils import find_pattern, character_span, leading_whitespace_behavior
 
 from transformers import AutoModel, AutoTokenizer, AutoConfig
 from transformers.utils.logging import set_verbosity_error
@@ -66,6 +66,8 @@ class CWE(object):
             )
             self.tokenizer.pad_token = "<|pad|>"
             self.model.resize_token_embeddings(len(self.tokenizer))
+
+        self.leading_whitespace_behavior = leading_whitespace_behavior(self.tokenizer)
 
         self.model.to(self.device)
         self.model.eval()
@@ -188,20 +190,35 @@ class CWE(object):
                         f"{s[idx[0]:idx[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
-            elif 'llama' in self.model_name: ## Seems like the GPT2 approach really fails w Llama's tokenizer
+            elif self.leading_whitespace_behavior=='llama': ## Seems like the GPT2 approach really fails w Llama's tokenizer
                 search_queries.append(
                     self.tokenizer.encode_plus(
                         f"{s[idx[0]:idx[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
-            else:
+            elif self.leading_whitespace_behavior=='gpt2':
                 ## this one really matters if we are using GPT2
                 search_queries.append(
                     self.tokenizer.encode_plus(
                         f" {s[idx[0]:idx[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
-
+            elif 'mixed' in self.leading_whitespace_behavior:
+                ## If behavior is mixed, let's stick with the majority of the tokenizer's behavior, but throw in a warning: 
+                print("Tokenizer has inconsistent behavior around leading whitespaces: this may lead to issues.")
+                if self.leading_whitespace_behavior=='gpt2-mixed':
+                    search_queries.append(
+                        self.tokenizer.encode_plus(
+                            f" {s[idx[0]:idx[1]]}", add_special_tokens=False
+                        )["input_ids"]
+                    )
+                elif self.leading_whitespace_behavior=='llama-mixed':
+                    search_queries.append(
+                        self.tokenizer.encode_plus(
+                            f"{s[idx[0]:idx[1]]}", add_special_tokens=False
+                        )["input_ids"]
+                    )
+        
         query_idx = list(
             map(
                 lambda x: find_pattern(x[0], x[1]),
@@ -324,26 +341,68 @@ class CWE(object):
                         f"{s[idx1[0]:idx1[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
-            else:
-                ## this one really matters if we are using GPT2
+            elif self.leading_whitespace_behavior=='llama': ## Seems like the GPT2 approach really fails w Llama's tokenizer
                 search_queries1.append(
                     self.tokenizer.encode_plus(
                         f"{s[idx1[0]:idx1[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
+            elif self.leading_whitespace_behavior=='gpt2':
+                ## this one really matters if we are using GPT2
+                search_queries1.append(
+                    self.tokenizer.encode_plus(
+                        f" {s[idx1[0]:idx1[1]]}", add_special_tokens=False
+                    )["input_ids"]
+                )
+            elif 'mixed' in self.leading_whitespace_behavior:
+                ## If behavior is mixed, let's stick with the majority of the tokenizer's behavior, but throw in a warning: 
+                print("Tokenizer has inconsistent behavior around leading whitespaces: this may lead to issues.")
+                if self.leading_whitespace_behavior=='gpt2-mixed':
+                    search_queries1.append(
+                        self.tokenizer.encode_plus(
+                            f" {s[idx1[0]:idx1[1]]}", add_special_tokens=False
+                        )["input_ids"]
+                    )
+                elif self.leading_whitespace_behavior=='llama-mixed':
+                    search_queries1.append(
+                        self.tokenizer.encode_plus(
+                            f"{s[idx1[0]:idx1[1]]}", add_special_tokens=False
+                        )["input_ids"]
+                    )
             if 0 in idx2:
                 search_queries2.append(
                     self.tokenizer.encode_plus(
                         f"{s[idx2[0]:idx2[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
-            else:
-                ## this one really matters if we are using GPT2
+            elif self.leading_whitespace_behavior=='llama': ## Seems like the GPT2 approach really fails w Llama's tokenizer
                 search_queries2.append(
                     self.tokenizer.encode_plus(
                         f"{s[idx2[0]:idx2[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
+            elif self.leading_whitespace_behavior=='gpt2':
+                ## this one really matters if we are using GPT2
+                search_queries2.append(
+                    self.tokenizer.encode_plus(
+                        f" {s[idx2[0]:idx2[1]]}", add_special_tokens=False
+                    )["input_ids"]
+                )
+            elif 'mixed' in self.leading_whitespace_behavior:
+                ## If behavior is mixed, let's stick with the majority of the tokenizer's behavior, but throw in a warning: 
+                print("Tokenizer has inconsistent behavior around leading whitespaces: this may lead to issues.")
+                if self.leading_whitespace_behavior=='gpt2-mixed':
+                    search_queries2.append(
+                        self.tokenizer.encode_plus(
+                            f" {s[idx2[0]:idx2[1]]}", add_special_tokens=False
+                        )["input_ids"]
+                    )
+                elif self.leading_whitespace_behavior=='llama-mixed':
+                    search_queries2.append(
+                        self.tokenizer.encode_plus(
+                            f"{s[idx2[0]:idx2[1]]}", add_special_tokens=False
+                        )["input_ids"]
+                    )
 
         # search_queries1 = [self.tokenizer.encode_plus(f'{" ".join(s.split()[idx1[0]:idx1[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
         # search_queries2 = [self.tokenizer.encode_plus(f'{" ".join(s.split()[idx2[0]:idx2[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
