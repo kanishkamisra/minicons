@@ -219,19 +219,24 @@ class LMScorer:
             token_index = 0
             word_index = 0
             word_scores = []  # list of word, surprisal tuples
-            while token_index < len(token_scores):
-                current_word = words[word_index]
-                current_token, current_surprisal = token_scores[token_index]
-                # token does not match, alignment must be adjusted
-                mismatch = (current_token != current_word)
-                while mismatch:
+            try:
+                while token_index < len(token_scores):
+                    current_word = words[word_index]
+                    current_token, current_surprisal = token_scores[token_index]
+                    # token does not match, alignment must be adjusted
+                    mismatch = (current_token != current_word)
+                    while mismatch:
+                        token_index += 1
+                        current_token += token_scores[token_index][0]
+                        current_surprisal += token_scores[token_index][1]
+                        mismatch = current_token != current_word
+                    word_scores.append((current_word, current_surprisal))
                     token_index += 1
-                    current_token += token_scores[token_index][0]
-                    current_surprisal += token_scores[token_index][1]
-                    mismatch = current_token != current_word
-                word_scores.append((current_word, current_surprisal))
-                token_index += 1
-                word_index += 1
+                    word_index += 1
+            except Exception:
+                warning_message = f"Failed to aggregate word-level scores for {sentence}, returning token-level scores"
+                warnings.warn(warning_message)
+                word_scores = token_scores
             all_word_scores.append(word_scores)
         return all_word_scores
 
