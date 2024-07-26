@@ -216,6 +216,9 @@ class LMScorer:
                 sentence = batch[i]
             words = re.findall(r"[\w']+|[.,!?;]", sentence)
             token_scores = all_token_scores[i]
+            # if token_score pads the beginning with a token (i.e. like llama)
+            if token_scores[0][0] == self.tokenizer.special_tokens_map['bos_token']:
+                token_scores = token_scores[1:]
             token_index = 0
             word_index = 0
             word_scores = []  # list of word, surprisal tuples
