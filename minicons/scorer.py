@@ -12,6 +12,7 @@ from typing import (
     cast,
 )
 
+import re
 import torch
 import warnings
 
@@ -41,7 +42,6 @@ from transformers.utils.logging import set_verbosity_error
 from .utils import batch_wise_logprobs
 
 set_verbosity_error()
-
 
 class LMScorer:
     """
@@ -181,6 +181,67 @@ class LMScorer:
         :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
         """
         raise NotImplementedError
+    
+    def word_score(
+        self,
+        batch: Union[str, List[str]],
+        surprisal: bool = False,
+        prob: bool = False,
+        base_two: bool = False,
+        rank: bool = False,
+    ) -> Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]:
+        """
+        Wraps token_score's outputs into word-level metrics:
+            `(word, score)`,
+        where score represents the log-probability (by default) of the word given context.
+        Token probabilities are summed across the whole word. Words are currently split on spaces and punctuation.
+
+        Args are the same as token_score except for `agg_method`
+        :param ``Union[str, List[str]]`` batch: a single sentence or a batch of sentences.
+        :param ``bool`` surprisal: If `True`, returns per-word surprisals instead of log-probabilities.
+        :param ``bool`` prob: If `True`, returns per-word probabilities instead of log-probabilities.
+        :param ``bool`` base_two: If `True`, uses log base 2 instead of natural-log (returns bits of values in case of surprisals)
+        :param ``bool`` rank: If `True`, also returns the rank of each word in context (based on the log-probability value)
+
+        Outputs are in the same format as token_score outputs
+        :return: A `List` containing a `Tuple` consisting of the word, its associated score, and optionally, its rank.
+        :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
+        """
+        all_token_scores = self.token_score(batch, surprisal, prob, base_two, rank)
+        all_word_scores = []
+        for i in range(len(all_token_scores)):
+            if type(batch) == str:
+                sentence = batch
+            else:
+                sentence = batch[i]
+            words = re.findall(r"[\w']+|[.,!?;]", sentence)
+            token_scores = all_token_scores[i]
+            # if token_score pads the beginning with a token (i.e. like llama)
+            if token_scores[0][0] == self.tokenizer.special_tokens_map['bos_token']:
+                token_scores = token_scores[1:]
+            token_index = 0
+            word_index = 0
+            word_scores = []  # list of word, surprisal tuples
+            try:
+                while token_index < len(token_scores):
+                    current_word = words[word_index]
+                    current_token, current_surprisal = token_scores[token_index]
+                    # token does not match, alignment must be adjusted
+                    mismatch = (current_token != current_word)
+                    while mismatch:
+                        token_index += 1
+                        current_token += token_scores[token_index][0]
+                        current_surprisal += token_scores[token_index][1]
+                        mismatch = current_token != current_word
+                    word_scores.append((current_word, current_surprisal))
+                    token_index += 1
+                    word_index += 1
+            except Exception:
+                warning_message = f"Failed to aggregate word-level scores for {sentence}, returning token-level scores"
+                warnings.warn(warning_message)
+                word_scores = token_scores
+            all_word_scores.append(word_scores)
+        return all_word_scores
 
     def score(
         self, batch: Union[str, List[str]], pool: Callable = torch.mean, *args
