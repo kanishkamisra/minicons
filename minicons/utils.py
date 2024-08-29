@@ -3,9 +3,12 @@ import re
 import string
 import torch
 
+from itertools import groupby
 from typing import List, Tuple, Optional
+from wonderwords import (
+    RandomWord,
+)  # Basic library to randomly generate lists of words
 
-from wonderwords import RandomWord # Basic library I found to randomly generate lists of words
 
 def get_batch(data: list, batch_size: int, shuffle: bool = False):
     if shuffle:
@@ -23,11 +26,18 @@ def get_batch(data: list, batch_size: int, shuffle: bool = False):
         batch = data[sindex:]
         yield batch
 
+
+def all_equal(iterable):
+    g = groupby(iterable)
+    return next(g, True) and not next(g, False)
+
+
 def between(num, tup):
     if num >= tup[0] and num < tup[1]:
         return True
     else:
         return False
+
 
 def character_span(sentence, word):
     assert word in sentence
@@ -126,31 +136,39 @@ def batch_wise_logprobs(logprobs, ids, reduction):
 
     return torch.stack(batch_labels)
 
+
 def leading_whitespace_behavior(tokenizer, n_random_words=1000):
     r = RandomWord()
     test_words = r.random_words(n_random_words)
+
     def is_sublist(superlist, sublist):
-        '''
-        This checks if, e.g., [20, 764, 290] is a 'sublist'/'subsequence' of e.g. [152, 20, 764, 290]. 
+        """
+        This checks if, e.g., [20, 764, 290] is a 'sublist'/'subsequence' of e.g. [152, 20, 764, 290].
         This is used to test the following: if "<word>" is tokenized as [tokenID_1], is " <word>" tokenized as [whitespace_ID, tokenID_1], or as [tokenID_2]?
-        i.e. how does the tokenizer treat leading whitespace? 
-        '''
-        sublist_bool = any(superlist[idx: idx + len(sublist)] == sublist for idx in range(len(superlist) - len(sublist) + 1))
+        i.e. how does the tokenizer treat leading whitespace?
+        """
+        sublist_bool = any(
+            superlist[idx : idx + len(sublist)] == sublist
+            for idx in range(len(superlist) - len(sublist) + 1)
+        )
         return sublist_bool
-    
-    divergences = [] # How many words are tokenized differently when fed in with a leading whitespace?
+
+    divergences = (
+        []
+    )  # How many words are tokenized differently when fed in with a leading whitespace?
     for word in test_words:
         no_leading_space = tokenizer.encode(word, add_special_tokens=False)
         leading_space = tokenizer.encode(f" {word}", add_special_tokens=False)
         divergences.append(is_sublist(leading_space, no_leading_space))
     #
-    average = sum(divergences)/len(divergences)
-    if average <= 0.05: # Classify leading whitespace behavior on this kind of graded spectrum
-        return 'gpt2' # tokenizers like GPT2's generally encode "word" as [tokenID_1] and " word" as [tokenID_2]. The encoding for "something something word something" is likely to include tokenID_2, not tokenID_1.
+    average = sum(divergences) / len(divergences)
+    if (
+        average <= 0.05
+    ):  # Classify leading whitespace behavior on this kind of graded spectrum
+        return "gpt2"  # tokenizers like GPT2's generally encode "word" as [tokenID_1] and " word" as [tokenID_2]. The encoding for "something something word something" is likely to include tokenID_2, not tokenID_1.
     elif 0.05 < average <= 0.5:
-        return 'gpt2-mixed' # Generally like GPT2 tokenizer behavior, but not 100%
+        return "gpt2-mixed"  # Generally like GPT2 tokenizer behavior, but not 100%
     elif 0.5 < average <= 0.95:
-        return 'llama-mixed' # Generally like Llama tokenizer behavior, but not 100%
+        return "llama-mixed"  # Generally like Llama tokenizer behavior, but not 100%
     else:
-        return 'llama' # tokenizers like the Llama Tokenizer seem to generally encode "word" as [token_ID1] and " word" as [whitespace_ID, tokenID_1]. The encoding "something something word something" is likely to include tokenID_1.  
-
+        return "llama"  # tokenizers like the Llama Tokenizer seem to generally encode "word" as [token_ID1] and " word" as [whitespace_ID, tokenID_1]. The encoding "something something word something" is likely to include tokenID_1.

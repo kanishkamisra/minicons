@@ -18,7 +18,7 @@ import warnings
 
 from collections import defaultdict
 from itertools import chain
-from re import sub
+
 import numpy as np
 from transformers import (
     AutoModelForCausalLM,
@@ -39,9 +39,10 @@ except:
 
 from transformers.utils.logging import set_verbosity_error
 
-from .utils import batch_wise_logprobs
+from .utils import batch_wise_logprobs, all_equal
 
 set_verbosity_error()
+
 
 class LMScorer:
     """
@@ -54,6 +55,7 @@ class LMScorer:
         model: Union[str, torch.nn.Module],
         device: Optional[str] = "cpu",
         tokenizer=None,
+        **kwargs,
     ) -> None:
         """
         :param model: should be path to a model (.pt or .bin file) stored
@@ -68,7 +70,7 @@ class LMScorer:
         """
         if tokenizer is not None:
             if isinstance(tokenizer, str):
-                self.tokenizer = AutoTokenizer.from_pretrained(tokenizer)
+                self.tokenizer = AutoTokenizer.from_pretrained(tokenizer, **kwargs)
             else:
                 self.tokenizer = tokenizer
         elif isinstance(model, str):
@@ -100,35 +102,76 @@ class LMScorer:
 
         return tokens, probs
 
-    def query(self, distribution: torch.Tensor, queries: List[str]) -> Tuple:
-        # this will be self.vocab tho
-        query_ids = [self.vocab[a] for a in queries]
-        maxlen = max(map(len, query_ids))
-        query_ids = [
-            (
-                q + [self.tokenizer.pad_token_id] * (maxlen - len(q))
-                if len(q) < maxlen
-                else q
-            )
-            for q in query_ids
-        ]
-        current_batch_size = distribution.shape[0]
-        probs = (
-            distribution[torch.arange(current_batch_size)[:, None], query_ids]
-            .max(1)
-            .values.exp()
-            .tolist()
-        )
+    # def query(self, distribution: torch.Tensor, queries: List[str]) -> Tuple:
+    #     # this will be self.vocab tho
+    #     query_ids = [self.vocab[a] for a in queries]
+    #     maxlen = max(map(len, query_ids))
+    #     query_ids = [
+    #         (
+    #             q + [self.tokenizer.pad_token_id] * (maxlen - len(q))
+    #             if len(q) < maxlen
+    #             else q
+    #         )
+    #         for q in query_ids
+    #     ]
+    #     current_batch_size = distribution.shape[0]
+    #     probs = (
+    #         distribution[torch.arange(current_batch_size)[:, None], query_ids]
+    #         .max(1)
+    #         .values.exp()
+    #         .tolist()
+    #     )
 
-        inv_ranks = distribution.argsort().argsort() + 1
-        ranks = distribution.shape[1] - inv_ranks + 1
-        token_ranks = (
-            ranks[torch.arange(current_batch_size)[:, None], query_ids]
-            .min(1)
-            .values.tolist()
-        )
+    #     inv_ranks = distribution.argsort().argsort() + 1
+    #     ranks = distribution.shape[1] - inv_ranks + 1
+    #     token_ranks = (
+    #         ranks[torch.arange(current_batch_size)[:, None], query_ids]
+    #         .min(1)
+    #         .values.tolist()
+    #     )
 
-        return probs, token_ranks
+    #     return probs, token_ranks
+
+    def query(
+        self,
+        distribution: torch.Tensor,
+        queries: List[List[str]],
+        prob: bool = True,
+        tolist: bool = True,
+    ):
+        """Queries distributions for (log)probabilities of target tokens."""
+        if isinstance(queries[0], str):
+            queries = [queries]
+
+        scores = []
+        token_ranks = []
+        for i, querylist in enumerate(queries):
+            query_ids = [self.vocab[a] for a in querylist]
+            maxlen = max(map(len, query_ids))
+            query_ids = [
+                (
+                    q + [self.tokenizer.pad_token_id] * (maxlen - len(q))
+                    if len(q) < maxlen
+                    else q
+                )
+                for q in query_ids
+            ]
+            query_logprobs = distribution[i, query_ids].max(1).values
+
+            inv_ranks = distribution.argsort().argsort() + 1
+            ranks = distribution.shape[1] - inv_ranks + 1
+            query_token_ranks = ranks[i, query_ids].min(1).values.tolist()
+
+            scores.append(query_logprobs)
+            token_ranks.append(query_token_ranks)
+
+        if prob:
+            scores = [s.exp() for s in scores]
+
+        if tolist:
+            scores = [s.tolist() for s in scores]
+
+        return scores, token_ranks
 
     def logprobs(
         self, batch: Iterable, rank: bool = False
@@ -181,7 +224,7 @@ class LMScorer:
         :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
         """
         raise NotImplementedError
-    
+
     def word_score(
         self,
         batch: Union[str, List[str]],
@@ -217,7 +260,7 @@ class LMScorer:
             words = re.findall(r"[\w']+|[.,!?;]", sentence)
             token_scores = all_token_scores[i]
             # if token_score pads the beginning with a token (i.e. like llama)
-            if token_scores[0][0] == self.tokenizer.special_tokens_map['bos_token']:
+            if token_scores[0][0] == self.tokenizer.special_tokens_map["bos_token"]:
                 token_scores = token_scores[1:]
             token_index = 0
             word_index = 0
@@ -227,7 +270,7 @@ class LMScorer:
                     current_word = words[word_index]
                     current_token, current_surprisal = token_scores[token_index]
                     # token does not match, alignment must be adjusted
-                    mismatch = (current_token != current_word)
+                    mismatch = current_token != current_word
                     while mismatch:
                         token_index += 1
                         current_token += token_scores[token_index][0]
@@ -542,7 +585,7 @@ class MaskedLMScorer(LMScorer):
         for sentence, word in sentence_words:
             words.append(word)
             sentences.append(
-                sub(
+                re.sub(
                     rf"(?<![\w\/-])({word})(?=[^\w\/-])",
                     self.tokenizer.mask_token,
                     sentence,
@@ -915,23 +958,35 @@ class MaskedLMScorer(LMScorer):
 
         prompts, words = zip(*queries)
 
-        modified_prompts = self.add_special_tokens(prompts)
-        splits = [prompt.split(word) for prompt, word in zip(modified_prompts, words)]
+        # modified_prompts = self.add_special_tokens(prompts)
+        modified_prompts = self.tokenizer.batch_decode(
+            self.tokenizer(prompts)["input_ids"]
+        )
+        # splits = [prompt.split(word) for prompt, word in zip(modified_prompts, words)]
+        splits = [
+            re.split(rf"\b{word}\b", prompt)
+            for prompt, word in zip(modified_prompts, words)
+        ]
         splits = [[x.strip() for x in s] for s in splits]
         pre, post = list(zip(*splits))
         pre_idx = self.tokenizer(list(pre), add_special_tokens=False, padding=False)[
             "input_ids"
         ]
         mask_idx = [len(item) for item in pre_idx]
+        # masked = [
+        #     m.replace(w, self.tokenizer.mask_token)
+        #     for m, w in zip(modified_prompts, words)
+        # ]
         masked = [
-            m.replace(w, self.tokenizer.mask_token)
-            for m, w in zip(modified_prompts, words)
+            re.sub(rf"\b{w}\b", self.tokenizer.mask_token, m)
+            for m, w in zip(prompts, words)
         ]
 
         with torch.no_grad():
-            encoded = self.tokenizer(
-                masked, add_special_tokens=False, return_tensors="pt", padding=True
-            )
+            # encoded = self.tokenizer(
+            #     masked, add_special_tokens=False, return_tensors="pt", padding=True
+            # )
+            encoded = self.tokenizer(masked, return_tensors="pt", padding=True)
             if self.device != "auto":
                 encoded = encoded.to(self.device)
             logits = self.model(**encoded)
@@ -944,6 +999,36 @@ class MaskedLMScorer(LMScorer):
         logprobs = presoftmax - presoftmax.logsumexp(1).unsqueeze(1)
 
         return logprobs
+
+    def entropy(
+        self,
+        sentence_words: Union[Collection[Tuple[str, str]]],
+        space: List[List[str]] = None,
+        base_two: bool = False,
+    ):
+        logprobs = self.cloze_distribution(sentence_words)
+
+        if space is not None:
+            probs, ranks = self.query(logprobs, space, prob=True, tolist=False)
+
+            # stack
+            equal_len = all_equal(len(x) for x in space)
+
+            if not equal_len:
+                probs = torch.nested.nested_tensor(probs).to_padded_tensor(0)
+            else:
+                probs = torch.stack(probs)
+
+            # renormalize
+            probs = probs / (probs.sum(1).unsqueeze(1))
+            logprobs = probs.log()
+
+        if base_two:
+            H = -(logprobs.exp() * logprobs / torch.tensor(2).log()).sum(1)
+        else:
+            H = -(logprobs.exp() * logprobs).sum(1)
+
+        return H
 
     def logprobs(
         self, batch: Iterable, rank=False
@@ -1268,7 +1353,7 @@ class IncrementalLMScorer(LMScorer):
         :param tokenizer: if provided, use this tokenizer.
         """
         super(IncrementalLMScorer, self).__init__(
-            model, device=device, tokenizer=tokenizer
+            model, device=device, tokenizer=tokenizer, **kwargs
         )
 
         if isinstance(model, str):
@@ -2998,16 +3083,27 @@ class MambaScorer(LMScorer):
 
 
 class VLMScorer(LMScorer):
-    def __init__(self, model, device, tokenizer=None, **kwargs):
+    def __init__(self, model, device, tokenizer=None, causallm=False, **kwargs):
         super(VLMScorer, self).__init__(model, device=device, tokenizer=tokenizer)
+        self.causallm = causallm
         if isinstance(model, str):
-            self.tokenizer = AutoProcessor.from_pretrained(model)
-            if self.device == "auto":
-                self.model = AutoModelForVision2Seq.from_pretrained(
-                    model, device_map=self.device, **kwargs
-                )
+            if self.causallm:
+                self.tokenizer = AutoTokenizer.from_pretrained(model, **kwargs)
+                self.processor = AutoProcessor.from_pretrained(model, **kwargs)
+                if self.device == "auto":
+                    self.model = AutoModelForCausalLM.from_pretrained(
+                        model, device_map=self.device, **kwargs
+                    )
+                else:
+                    self.model = AutoModelForCausalLM.from_pretrained(model, **kwargs)
             else:
-                self.model = AutoModelForVision2Seq.from_pretrained(model, **kwargs)
+                self.tokenizer = AutoProcessor.from_pretrained(model, **kwargs)
+                if self.device == "auto":
+                    self.model = AutoModelForVision2Seq.from_pretrained(
+                        model, device_map=self.device, **kwargs
+                    )
+                else:
+                    self.model = AutoModelForVision2Seq.from_pretrained(model, **kwargs)
         else:
             self.model = model
 
@@ -3048,9 +3144,16 @@ class VLMScorer(LMScorer):
         text = [text] if isinstance(text, str) else text
         image = [image] if isinstance(image, Image.Image) else image
         # text = [_format(self, t, image, bos_token, eos_token) for t in text]
-        encoded = self.tokenizer(
-            text=text, images=image, return_tensors="pt", padding=True
-        )
+        if self.causallm:
+            encoded_text = self.tokenizer(text, return_tensors="pt", padding=True)
+            encoded_images = self.processor(images=image, return_tensors="pt")
+            encoded = BatchEncoding(
+                {k: v for obj in [encoded_text, encoded_images] for k, v in obj.items()}
+            )
+        else:
+            encoded = self.tokenizer(
+                text=text, images=image, return_tensors="pt", padding=True
+            )
         if "token_type_ids" in encoded.keys():
             encoded.pop("token_type_ids")
 
@@ -3189,7 +3292,7 @@ class VLMScorer(LMScorer):
         ), "cannot both use base (which is for a log), and a probability measure at the same time!"
 
         encoded, offsets = batch
-        cutoff = encoded.input_ids.shape[-1]
+        cutoff = encoded["input_ids"].shape[-1]
         if self.device != "auto":
             encoded = encoded.to(self.device)
 
