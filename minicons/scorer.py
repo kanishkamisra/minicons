@@ -232,6 +232,7 @@ class LMScorer:
         prob: bool = False,
         base_two: bool = False,
         rank: bool = False,
+        bow_correction: bool = False,
     ) -> Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]:
         """
         Wraps token_score's outputs into word-level metrics:
@@ -250,7 +251,14 @@ class LMScorer:
         :return: A `List` containing a `Tuple` consisting of the word, its associated score, and optionally, its rank.
         :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
         """
-        all_token_scores = self.token_score(batch, surprisal, prob, base_two, rank)
+        all_token_scores = self.token_score(
+            batch=batch,
+            surprisal=surprisal,
+            prob=prob,
+            base_two=base_two,
+            rank=rank,
+            bow_correction=bow_correction,
+        )
         all_word_scores = []
         for i in range(len(all_token_scores)):
             if type(batch) == str:
@@ -311,11 +319,6 @@ class LMScorer:
             "score is deprecated, use sequence_score or token_score instead",
             DeprecationWarning,
         )
-        result = self.logprobs(self.prepare_text(batch))
-        logprob, _ = list(zip(*result))
-        pooled = list(map(lambda x: pool(x, *args).tolist(), logprob))
-
-        return pooled
 
     def adapt_score(
         self,
@@ -344,13 +347,6 @@ class LMScorer:
             "partial_score is deprecated, use conditional_score instead",
             DeprecationWarning,
         )
-        return self.conditional_score(
-            prefix=preamble,
-            stimuli=stimuli,
-            separator=separator,
-            reduction=reduction,
-            **kwargs,
-        )
 
     def conditional_score(
         self,
@@ -360,6 +356,7 @@ class LMScorer:
         reduction: Callable = lambda x: x.mean(0).item(),
         prob: bool = False,
         base_two: bool = False,
+        bow_correction: bool = False,
         **kw,
     ) -> List[float]:
         """
@@ -382,7 +379,12 @@ class LMScorer:
         primed = self.prime_text(prefix, stimuli, separator, **kw)
 
         result = self.compute_stats(
-            primed, rank=False, base_two=base_two, prob=prob, return_tensors=True
+            primed,
+            rank=False,
+            base_two=base_two,
+            prob=prob,
+            bow_correction=bow_correction,
+            return_tensors=True,
         )
         logprob = result
         reduced = list(map(reduction, logprob))
@@ -395,6 +397,7 @@ class LMScorer:
         reduction=lambda x: x.mean(0).item(),
         prob: bool = False,
         base_two: bool = False,
+        bow_correction: bool = False,
         **kw,
     ):
         """
@@ -413,7 +416,12 @@ class LMScorer:
         """
         tokenized = self.prepare_text(batch, **kw)
         scores = self.compute_stats(
-            tokenized, rank=False, base_two=base_two, prob=prob, return_tensors=True
+            tokenized,
+            rank=False,
+            base_two=base_two,
+            prob=prob,
+            bow_correction=bow_correction,
+            return_tensors=True,
         )
         reduced = list(map(reduction, scores))
         return reduced
@@ -1189,6 +1197,35 @@ class MaskedLMScorer(LMScorer):
         else:
             return scores
 
+    def sequence_score(
+        self,
+        batch,
+        reduction=lambda x: x.mean(0).item(),
+        prob: bool = False,
+        base_two: bool = False,
+        **kw,
+    ):
+        """
+        Pooled estimates of sequence log probabilities (or some modification of it).
+
+        :param batch: a batch of sequences whose score you want to calculate.
+        :type batch: ``Union[str, List[str]]``
+        :param reduction: Reduction function, is selected to be
+            ``lambda x: x.mean(0).item()`` by default, which stands for the avg. log-probability per token for each sequence in the batch.
+        :type reduction: Callable
+        :param kw: model-specific keyword arguments to pass to the `prepare_text` function
+        :return: List of floats specifying the desired score for the stimuli part of the input, e.g., P(stimuli | preamble).
+        :rtype: ``List[float]``
+
+        TODO: reduction should be a string, if it's a function, specify what kind of function. --> how to ensure it is always that type?
+        """
+        tokenized = self.prepare_text(batch, **kw)
+        scores = self.compute_stats(
+            tokenized, rank=False, base_two=base_two, prob=prob, return_tensors=True
+        )
+        reduced = list(map(reduction, scores))
+        return reduced
+
     def token_score(
         self,
         batch: Union[str, List[str]],
@@ -1394,6 +1431,26 @@ class IncrementalLMScorer(LMScorer):
 
         self.padding_side = self.tokenizer.padding_side
 
+        # bow_subtokens, but only if the model has a
+        self.bow_symbol = self.tokenizer.convert_ids_to_tokens(
+            self.tokenizer(" ").input_ids[0]
+        )
+        if self.bow_symbol == self.bos_token or self.bow_symbol is None or self.bow_symbol == self.eos_token:
+            is_bow_tokenizer = False
+        else:
+            is_bow_tokenizer = True
+
+        if is_bow_tokenizer:
+            self.bow_subwords = defaultdict(lambda: False)
+            for word, idx in self.tokenizer.get_vocab().items():
+                if word[0] == self.bow_symbol:
+                    self.bow_subwords[idx] = True
+                else:
+                    self.bow_subwords[idx] = False
+
+            self.bow_subwords = dict(self.bow_subwords)
+            self.bow_subword_idx = [k for k, v in self.bow_subwords.items() if v]
+
     def add_special_tokens(
         self,
         text: Union[str, List[str]],
@@ -1570,7 +1627,8 @@ class IncrementalLMScorer(LMScorer):
             for instance in encoded["input_ids"].tolist()
         ]
 
-        logits = self.model(**encoded).logits.detach()
+        with torch.no_grad():
+            logits = self.model(**encoded).logits.detach()
         logits[:, :, self.tokenizer.pad_token_id] = float("-inf")
 
         logits = logits[torch.arange(len(query_ids)), query_ids]
@@ -1588,6 +1646,7 @@ class IncrementalLMScorer(LMScorer):
         prob: bool = False,
         base_two: bool = False,
         return_tensors: bool = False,
+        bow_correction: bool = False,
     ) -> Union[Tuple[List[float], List[float]], List[float]]:
         """
         Primary computational method that processes a batch of prepared sentences and returns per-token scores for each sentence. By default, returns log-probabilities.
@@ -1597,6 +1656,7 @@ class IncrementalLMScorer(LMScorer):
         :param ``bool`` prob: whether the model should return probabilities instead of log-probabilities. Can only be `True` when `base_two` is `False`.
         :param ``bool`` base_two: whether the base of the log should be 2 (usually preferred when reporting results in bits). Can only be `True` when `prob` is `False`.
         :param ``bool`` return_tensors: whether the model should return scores as a list of tensors instead of a list of lists. This is important in some other convenient methods used in the package.
+        :param ``bool'' bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
 
         :return: Either a tuple of lists, each containing probabilities and ranks per token in each sentence passed in the input.
         :rtype: ``Union[Tuple[List[float], List[int]], List[float]]``
@@ -1637,29 +1697,84 @@ class IncrementalLMScorer(LMScorer):
 
         for logit, idx, offset in zip(logits, effective_ids, offsets):
             length = len(idx)
-            logit = logit.squeeze(0)[torch.arange(offset, length),]
+            # logit = logit.squeeze(0)[torch.arange(offset, length),]
 
-            logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
+            # logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
+
             query_ids = idx[offset:]
+            logit = logit.squeeze(0)
+            logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
+
+            actual_logprob_distribution = logprob_distribution[
+                torch.arange(offset, length),
+            ]
+
+            score = actual_logprob_distribution[
+                torch.arange(length - offset), query_ids
+            ]
+
+            if not self.is_bow_tokenizer:
+                bow_correction = False
+
+            if bow_correction:
+                # mask_forward = torch.zeros_like(logprob_distribution)
+                # mask_current = torch.zeros_like(logprob_distribution)
+                mask_forward = torch.zeros(length).to(self.device)
+                mask_current = torch.zeros(length).to(self.device)
+
+                for i in range(len(idx)):
+                    if i == len(idx) - 1:
+                        mask_forward[i] = 1
+                        if not self.bow_subwords[idx[i]]:
+                            mask_current[i] = 0
+                        else:
+                            mask_current[i] = 1
+                        break
+                    elif self.bow_subwords[idx[i + 1]]:
+                        mask_forward[i] = 1
+                        if not self.bow_subwords[idx[i]]:
+                            mask_current[i] = 0
+                        else:
+                            mask_current[i] = 1
+                    else:
+                        mask_forward[i] = 0
+                        mask_current[i] = 1
+
+                mask_forward = mask_forward[offset:]
+                mask_current = mask_current[offset:]
+
+                bow_subword_idx_tensor = torch.tensor(self.bow_subword_idx).to(
+                    self.device
+                )
+
+                forward_correction = (
+                    logprob_distribution[offset:][torch.arange(length - offset) + 1,]
+                    .index_select(-1, bow_subword_idx_tensor)
+                    .logsumexp(1)
+                )
+
+                current_correction = (
+                    actual_logprob_distribution[torch.arange(length - offset),]
+                    .index_select(-1, bow_subword_idx_tensor)
+                    .logsumexp(1)
+                )
+
+                score = (
+                    score
+                    + (forward_correction * mask_forward)
+                    - (current_correction * mask_current)
+                )
+
             if base_two:
                 """
                 Log_2(X) = log_e(X)/log_e(2) (broadcasted)
                 """
-                score = (
-                    logprob_distribution[torch.arange(length - offset), query_ids]
-                    / torch.tensor(2).log()
-                ).tolist()
+                score = score / torch.tensor(2).log().tolist()
             else:
                 if prob:
-                    score = (
-                        logprob_distribution[torch.arange(length - offset), query_ids]
-                        .exp()
-                        .tolist()
-                    )
+                    score = score.exp().tolist()
                 else:
-                    score = logprob_distribution[
-                        torch.arange(length - offset), query_ids
-                    ].tolist()
+                    score = score.tolist()
 
             if rank:
                 # shape = logprob_distribution.shape
@@ -1673,7 +1788,9 @@ class IncrementalLMScorer(LMScorer):
                 TODO: Try to implement ranking in linear time but across arbitrary dimensions:
                 https://stackoverflow.com/a/5284703
                 """
-                word_ranks = (-1.0 * logprob_distribution).argsort().argsort() + 1
+                word_ranks = (
+                    -1.0 * actual_logprob_distribution
+                ).argsort().argsort() + 1
                 # inv_ranks = logprob_distribution.argsort().argsort() + 1
                 # word_ranks = shape[1] - inv_ranks + 1
                 word_ranks = word_ranks[
@@ -1681,7 +1798,7 @@ class IncrementalLMScorer(LMScorer):
                 ].tolist()
                 ranks.append(word_ranks)
 
-            scores.append(score)
+                scores.append(score)
 
         if return_tensors:
             scores = [torch.tensor(l) for l in scores]
@@ -1692,14 +1809,23 @@ class IncrementalLMScorer(LMScorer):
             return scores
 
     def sequence_score(
-        self, batch, reduction=lambda x: x.mean(0).item(), base_two=False, **kwargs
+        self,
+        batch,
+        reduction=lambda x: x.mean(0).item(),
+        base_two=False,
+        bow_correction=False,
+        **kwargs,
     ):
         """
         TODO: reduction should be a string, if it's a function, specify what kind of function. --> how to ensure it is always that type?
         """
         tokenized = self.prepare_text(batch, **kwargs)
         scores = self.compute_stats(
-            tokenized, rank=False, base_two=base_two, return_tensors=True
+            tokenized,
+            rank=False,
+            base_two=base_two,
+            bow_correction=bow_correction,
+            return_tensors=True,
         )
         reduced = list(map(reduction, scores))
         return reduced
@@ -1712,6 +1838,7 @@ class IncrementalLMScorer(LMScorer):
         base_two: bool = False,
         rank: bool = False,
         decode: bool = True,
+        bow_correction: bool = False,
         **kwargs,
     ) -> Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]:
         """
@@ -1725,6 +1852,7 @@ class IncrementalLMScorer(LMScorer):
         :param ``bool`` prob: If `True`, returns per-word probabilities instead of log-probabilities.
         :param ``bool`` base_two: If `True`, uses log base 2 instead of natural-log (returns bits of values in case of surprisals)
         :param ``bool`` rank: If `True`, also returns the rank of each word in context (based on the log-probability value)
+        :param ``bool'' bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
 
         :return: A `List` containing a `Tuple` consisting of the word, its associated score, and optionally, its rank.
         :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
@@ -1740,11 +1868,20 @@ class IncrementalLMScorer(LMScorer):
         tokenized = self.prepare_text(batch, **kwargs)
         if rank:
             scores, ranks = self.compute_stats(
-                tokenized, rank=rank, prob=prob, base_two=base_two, return_tensors=True
+                tokenized,
+                rank=rank,
+                prob=prob,
+                base_two=base_two,
+                bow_correction=bow_correction,
+                return_tensors=True,
             )
         else:
             scores = self.compute_stats(
-                tokenized, prob=prob, base_two=base_two, return_tensors=True
+                tokenized,
+                prob=prob,
+                base_two=base_two,
+                bow_correction=bow_correction,
+                return_tensors=True,
             )
 
         if surprisal:
@@ -2713,6 +2850,25 @@ class MambaScorer(LMScorer):
 
         self.padding_side = self.tokenizer.padding_side
 
+        self.bow_symbol = self.tokenizer.convert_ids_to_tokens(
+            self.tokenizer(" ").input_ids[0]
+        )
+        if self.bow_symbol == self.bos_token or self.bow_symbol is None or self.bow_symbol == self.eos_token:
+            is_bow_tokenizer = False
+        else:
+            is_bow_tokenizer = True
+
+        if is_bow_tokenizer:
+            self.bow_subwords = defaultdict(lambda: False)
+            for word, idx in self.tokenizer.get_vocab().items():
+                if word[0] == self.bow_symbol:
+                    self.bow_subwords[idx] = True
+                else:
+                    self.bow_subwords[idx] = False
+
+            self.bow_subwords = dict(self.bow_subwords)
+            self.bow_subword_idx = [k for k, v in self.bow_subwords.items() if v]
+
     def encode(
         self,
         text: Union[str, List[str]],
@@ -2873,6 +3029,7 @@ class MambaScorer(LMScorer):
         prob: bool = False,
         base_two: bool = False,
         return_tensors: bool = False,
+        bow_correction: bool = False,
     ) -> Union[Tuple[List[float], List[float]], List[float]]:
         """
         Primary computational method that processes a batch of prepared sentences and returns per-token scores for each sentence. By default, returns log-probabilities.
@@ -2882,6 +3039,7 @@ class MambaScorer(LMScorer):
         :param ``bool`` prob: whether the model should return probabilities instead of log-probabilities. Can only be `True` when `base_two` is `False`.
         :param ``bool`` base_two: whether the base of the log should be 2 (usually preferred when reporting results in bits). Can only be `True` when `prob` is `False`.
         :param ``bool`` return_tensors: whether the model should return scores as a list of tensors instead of a list of lists. This is important in some other convenient methods used in the package.
+        :param ``bool'' bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
 
         :return: Either a tuple of lists, each containing probabilities and ranks per token in each sentence passed in the input.
         :rtype: ``Union[Tuple[List[float], List[int]], List[float]]``
@@ -2922,29 +3080,83 @@ class MambaScorer(LMScorer):
 
         for logit, idx, offset in zip(logits, effective_ids, offsets):
             length = len(idx)
-            logit = logit.squeeze(0)[torch.arange(offset, length),]
+            # logit = logit.squeeze(0)[torch.arange(offset, length),]
 
-            logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
+            # logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
             query_ids = idx[offset:]
+            logit = logit.squeeze(0)
+            logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
+
+            actual_logprob_distribution = logprob_distribution[
+                torch.arange(offset, length),
+            ]
+
+            score = actual_logprob_distribution[
+                torch.arange(length - offset), query_ids
+            ]
+
+            if not self.is_bow_tokenizer:
+                bow_correction = False
+
+            if bow_correction:
+                # mask_forward = torch.zeros_like(logprob_distribution)
+                # mask_current = torch.zeros_like(logprob_distribution)
+                mask_forward = torch.zeros(length).to(self.device)
+                mask_current = torch.zeros(length).to(self.device)
+
+                for i in range(len(idx)):
+                    if i == len(idx) - 1:
+                        mask_forward[i] = 1
+                        if not self.bow_subwords[idx[i]]:
+                            mask_current[i] = 0
+                        else:
+                            mask_current[i] = 1
+                        break
+                    elif self.bow_subwords[idx[i + 1]]:
+                        mask_forward[i] = 1
+                        if not self.bow_subwords[idx[i]]:
+                            mask_current[i] = 0
+                        else:
+                            mask_current[i] = 1
+                    else:
+                        mask_forward[i] = 0
+                        mask_current[i] = 1
+
+                mask_forward = mask_forward[offset:]
+                mask_current = mask_current[offset:]
+
+                bow_subword_idx_tensor = torch.tensor(self.bow_subword_idx).to(
+                    self.device
+                )
+
+                forward_correction = (
+                    logprob_distribution[offset:][torch.arange(length - offset) + 1,]
+                    .index_select(-1, bow_subword_idx_tensor)
+                    .logsumexp(1)
+                )
+
+                current_correction = (
+                    actual_logprob_distribution[torch.arange(length - offset),]
+                    .index_select(-1, bow_subword_idx_tensor)
+                    .logsumexp(1)
+                )
+
+                score = (
+                    score
+                    + (forward_correction * mask_forward)
+                    - (current_correction * mask_current)
+                )
+
             if base_two:
                 """
                 Log_2(X) = log_e(X)/log_e(2) (broadcasted)
                 """
-                score = (
-                    logprob_distribution[torch.arange(length - offset), query_ids]
-                    / torch.tensor(2).log()
-                ).tolist()
+                score = score / torch.tensor(2).log().tolist()
             else:
                 if prob:
-                    score = (
-                        logprob_distribution[torch.arange(length - offset), query_ids]
-                        .exp()
-                        .tolist()
-                    )
+                    score = score.exp().tolist()
                 else:
-                    score = logprob_distribution[
-                        torch.arange(length - offset), query_ids
-                    ].tolist()
+                    score = score.tolist()
 
             if rank:
                 # shape = logprob_distribution.shape
@@ -2958,7 +3170,9 @@ class MambaScorer(LMScorer):
                 TODO: Try to implement ranking in linear time but across arbitrary dimensions:
                 https://stackoverflow.com/a/5284703
                 """
-                word_ranks = (-1.0 * logprob_distribution).argsort().argsort() + 1
+                word_ranks = (
+                    -1.0 * actual_logprob_distribution
+                ).argsort().argsort() + 1
                 # inv_ranks = logprob_distribution.argsort().argsort() + 1
                 # word_ranks = shape[1] - inv_ranks + 1
                 word_ranks = word_ranks[
@@ -2966,7 +3180,7 @@ class MambaScorer(LMScorer):
                 ].tolist()
                 ranks.append(word_ranks)
 
-            scores.append(score)
+                scores.append(score)
 
         if return_tensors:
             scores = [torch.tensor(l) for l in scores]
@@ -2977,14 +3191,23 @@ class MambaScorer(LMScorer):
             return scores
 
     def sequence_score(
-        self, batch, reduction=lambda x: x.mean(0).item(), base_two=False, **kwargs
+        self,
+        batch,
+        reduction=lambda x: x.mean(0).item(),
+        base_two=False,
+        bow_correction=False,
+        **kwargs,
     ):
         """
         TODO: reduction should be a string, if it's a function, specify what kind of function. --> how to ensure it is always that type?
         """
         tokenized = self.prepare_text(batch, **kwargs)
         scores = self.compute_stats(
-            tokenized, rank=False, base_two=base_two, return_tensors=True
+            tokenized,
+            rank=False,
+            base_two=base_two,
+            bow_correction=bow_correction,
+            return_tensors=True,
         )
         reduced = list(map(reduction, scores))
         return reduced
@@ -2997,6 +3220,7 @@ class MambaScorer(LMScorer):
         base_two: bool = False,
         rank: bool = False,
         decode: bool = True,
+        bow_correction: bool = False,
         **kwargs,
     ) -> Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]:
         """
@@ -3010,6 +3234,7 @@ class MambaScorer(LMScorer):
         :param ``bool`` prob: If `True`, returns per-word probabilities instead of log-probabilities.
         :param ``bool`` base_two: If `True`, uses log base 2 instead of natural-log (returns bits of values in case of surprisals)
         :param ``bool`` rank: If `True`, also returns the rank of each word in context (based on the log-probability value)
+        :param ``bool'' bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
 
         :return: A `List` containing a `Tuple` consisting of the word, its associated score, and optionally, its rank.
         :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
@@ -3025,11 +3250,20 @@ class MambaScorer(LMScorer):
         tokenized = self.prepare_text(batch, **kwargs)
         if rank:
             scores, ranks = self.compute_stats(
-                tokenized, rank=rank, prob=prob, base_two=base_two, return_tensors=True
+                tokenized,
+                rank=rank,
+                prob=prob,
+                base_two=base_two,
+                bow_correction=bow_correction,
+                return_tensors=True,
             )
         else:
             scores = self.compute_stats(
-                tokenized, prob=prob, base_two=base_two, return_tensors=True
+                tokenized,
+                prob=prob,
+                base_two=base_two,
+                bow_correction=bow_correction,
+                return_tensors=True,
             )
 
         if surprisal:
@@ -3127,6 +3361,25 @@ class VLMScorer(LMScorer):
 
         if isinstance(model, str):
             self.model.eval()
+
+        self.bow_symbol = self.tokenizer.convert_ids_to_tokens(
+            self.tokenizer(" ").input_ids[0]
+        )
+        if self.bow_symbol == self.bos_token or self.bow_symbol is None or self.bow_symbol == self.eos_token:
+            is_bow_tokenizer = False
+        else:
+            is_bow_tokenizer = True
+
+        if is_bow_tokenizer:
+            self.bow_subwords = defaultdict(lambda: False)
+            for word, idx in self.tokenizer.get_vocab().items():
+                if word[0] == self.bow_symbol:
+                    self.bow_subwords[idx] = True
+                else:
+                    self.bow_subwords[idx] = False
+
+            self.bow_subwords = dict(self.bow_subwords)
+            self.bow_subword_idx = [k for k, v in self.bow_subwords.items() if v]
 
     def encode(self, text: Union[str, List[str]], image=None) -> BatchEncoding:
         # def _format(self, text, image, bos, eos):
@@ -3274,6 +3527,7 @@ class VLMScorer(LMScorer):
         prob: bool = False,
         base_two: bool = False,
         return_tensors: bool = False,
+        bow_correction: bool = False,
     ) -> Union[Tuple[List[float], List[float]], List[float]]:
         """
         Primary computational method that processes a batch of prepared sentences and returns per-token scores for each sentence. By default, returns log-probabilities.
@@ -3283,6 +3537,7 @@ class VLMScorer(LMScorer):
         :param ``bool`` prob: whether the model should return probabilities instead of log-probabilities. Can only be `True` when `base_two` is `False`.
         :param ``bool`` base_two: whether the base of the log should be 2 (usually preferred when reporting results in bits). Can only be `True` when `prob` is `False`.
         :param ``bool`` return_tensors: whether the model should return scores as a list of tensors instead of a list of lists. This is important in some other convenient methods used in the package.
+        :param ``bool'' bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
 
         :return: Either a tuple of lists, each containing probabilities and ranks per token in each sentence passed in the input.
         :rtype: ``Union[Tuple[List[float], List[int]], List[float]]``
@@ -3324,29 +3579,83 @@ class VLMScorer(LMScorer):
 
         for logit, idx, offset in zip(logits, effective_ids, offsets):
             length = len(idx)
-            logit = logit.squeeze(0)[torch.arange(offset, length),]
+            # logit = logit.squeeze(0)[torch.arange(offset, length),]
 
-            logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
+            # logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
             query_ids = idx[offset:]
+            logit = logit.squeeze(0)
+            logprob_distribution = logit - logit.logsumexp(1).unsqueeze(1)
+
+            actual_logprob_distribution = logprob_distribution[
+                torch.arange(offset, length),
+            ]
+
+            score = actual_logprob_distribution[
+                torch.arange(length - offset), query_ids
+            ]
+
+            if not self.is_bow_tokenizer:
+                bow_correction = False
+
+            if bow_correction:
+                # mask_forward = torch.zeros_like(logprob_distribution)
+                # mask_current = torch.zeros_like(logprob_distribution)
+                mask_forward = torch.zeros(length).to(self.device)
+                mask_current = torch.zeros(length).to(self.device)
+
+                for i in range(len(idx)):
+                    if i == len(idx) - 1:
+                        mask_forward[i] = 1
+                        if not self.bow_subwords[idx[i]]:
+                            mask_current[i] = 0
+                        else:
+                            mask_current[i] = 1
+                        break
+                    elif self.bow_subwords[idx[i + 1]]:
+                        mask_forward[i] = 1
+                        if not self.bow_subwords[idx[i]]:
+                            mask_current[i] = 0
+                        else:
+                            mask_current[i] = 1
+                    else:
+                        mask_forward[i] = 0
+                        mask_current[i] = 1
+
+                mask_forward = mask_forward[offset:]
+                mask_current = mask_current[offset:]
+
+                bow_subword_idx_tensor = torch.tensor(self.bow_subword_idx).to(
+                    self.device
+                )
+
+                forward_correction = (
+                    logprob_distribution[offset:][torch.arange(length - offset) + 1,]
+                    .index_select(-1, bow_subword_idx_tensor)
+                    .logsumexp(1)
+                )
+
+                current_correction = (
+                    actual_logprob_distribution[torch.arange(length - offset),]
+                    .index_select(-1, bow_subword_idx_tensor)
+                    .logsumexp(1)
+                )
+
+                score = (
+                    score
+                    + (forward_correction * mask_forward)
+                    - (current_correction * mask_current)
+                )
+
             if base_two:
                 """
                 Log_2(X) = log_e(X)/log_e(2) (broadcasted)
                 """
-                score = (
-                    logprob_distribution[torch.arange(length - offset), query_ids]
-                    / torch.tensor(2).log()
-                ).tolist()
+                score = score / torch.tensor(2).log().tolist()
             else:
                 if prob:
-                    score = (
-                        logprob_distribution[torch.arange(length - offset), query_ids]
-                        .exp()
-                        .tolist()
-                    )
+                    score = score.exp().tolist()
                 else:
-                    score = logprob_distribution[
-                        torch.arange(length - offset), query_ids
-                    ].tolist()
+                    score = score.tolist()
 
             if rank:
                 # shape = logprob_distribution.shape
@@ -3360,7 +3669,9 @@ class VLMScorer(LMScorer):
                 TODO: Try to implement ranking in linear time but across arbitrary dimensions:
                 https://stackoverflow.com/a/5284703
                 """
-                word_ranks = (-1.0 * logprob_distribution).argsort().argsort() + 1
+                word_ranks = (
+                    -1.0 * actual_logprob_distribution
+                ).argsort().argsort() + 1
                 # inv_ranks = logprob_distribution.argsort().argsort() + 1
                 # word_ranks = shape[1] - inv_ranks + 1
                 word_ranks = word_ranks[
@@ -3368,7 +3679,7 @@ class VLMScorer(LMScorer):
                 ].tolist()
                 ranks.append(word_ranks)
 
-            scores.append(score)
+                scores.append(score)
 
         if return_tensors:
             scores = [torch.tensor(l) for l in scores]
@@ -3384,13 +3695,18 @@ class VLMScorer(LMScorer):
         image_batch=None,
         reduction=lambda x: x.mean(0).item(),
         base_two=False,
+        bow_correction: bool = False,
     ):
         """
         TODO: reduction should be a string, if it's a function, specify what kind of function. --> how to ensure it is always that type?
         """
         tokenized = self.prepare_text(text_batch, image_batch)
         scores = self.compute_stats(
-            tokenized, rank=False, base_two=base_two, return_tensors=True
+            tokenized,
+            rank=False,
+            base_two=base_two,
+            bow_correction=bow_correction,
+            return_tensors=True,
         )
         reduced = list(map(reduction, scores))
         return reduced
@@ -3404,6 +3720,7 @@ class VLMScorer(LMScorer):
         base_two: bool = False,
         rank: bool = False,
         decode: bool = True,
+        bow_correction: bool = False,
         **kwargs,
     ) -> Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]:
         """
@@ -3417,6 +3734,7 @@ class VLMScorer(LMScorer):
         :param ``bool`` prob: If `True`, returns per-word probabilities instead of log-probabilities.
         :param ``bool`` base_two: If `True`, uses log base 2 instead of natural-log (returns bits of values in case of surprisals)
         :param ``bool`` rank: If `True`, also returns the rank of each word in context (based on the log-probability value)
+        :param ``bool'' bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
 
         :return: A `List` containing a `Tuple` consisting of the word, its associated score, and optionally, its rank.
         :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
@@ -3432,11 +3750,20 @@ class VLMScorer(LMScorer):
         tokenized = self.prepare_text(text_batch, image_batch, **kwargs)
         if rank:
             scores, ranks = self.compute_stats(
-                tokenized, rank=rank, prob=prob, base_two=base_two, return_tensors=True
+                tokenized,
+                rank=rank,
+                prob=prob,
+                base_two=base_two,
+                bow_correction=bow_correction,
+                return_tensors=True,
             )
         else:
             scores = self.compute_stats(
-                tokenized, prob=prob, base_two=base_two, return_tensors=True
+                tokenized,
+                prob=prob,
+                base_two=base_two,
+                bow_correction=bow_correction,
+                return_tensors=True,
             )
 
         if surprisal:
@@ -3503,6 +3830,7 @@ class VLMScorer(LMScorer):
         reduction: Callable = lambda x: x.mean(0).item(),
         prob: bool = False,
         base_two: bool = False,
+        bow_correction: bool = False,
         **kw,
     ) -> List[float]:
         """
@@ -3518,6 +3846,7 @@ class VLMScorer(LMScorer):
         :param reduction: Reduction function, is selected to be
             ``lambda x: x.mean(0).item()`` by default, which stands for the avg. log-probability per token for each sequence in the batch.
         :type reduction: Callable
+        :param ``bool'' bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
         :param kw: model-specific keyword arguments to pass to the `prepare_text` function
         :return: List of floats specifying the desired score for the stimuli part of the input, e.g., P(stimuli | preamble).
         :rtype: ``List[float]``
@@ -3525,7 +3854,12 @@ class VLMScorer(LMScorer):
         primed = self.prime_text(prefix, stimuli, image, separator, **kw)
 
         result = self.compute_stats(
-            primed, rank=False, base_two=base_two, prob=prob, return_tensors=True
+            primed,
+            rank=False,
+            base_two=base_two,
+            prob=prob,
+            bow_correction=bow_correction,
+            return_tensors=True,
         )
         logprob = result
         reduced = list(map(reduction, logprob))
