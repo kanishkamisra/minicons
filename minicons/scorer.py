@@ -1432,15 +1432,22 @@ class IncrementalLMScorer(LMScorer):
         self.padding_side = self.tokenizer.padding_side
 
         # bow_subtokens, but only if the model has a
-        self.bow_symbol = self.tokenizer.convert_ids_to_tokens(
-            self.tokenizer(" ").input_ids[0]
-        )
-        if self.bow_symbol == self.bos_token or self.bow_symbol is None or self.bow_symbol == self.eos_token:
-            is_bow_tokenizer = False
+        try:
+            self.bow_symbol = self.tokenizer.convert_ids_to_tokens(
+                self.tokenizer(" ", add_special_tokens=False).input_ids[0]
+            )
+        except:
+            self.bow_symbol = None
+        if (
+            self.bow_symbol == self.tokenizer.bos_token
+            or self.bow_symbol is None
+            or self.bow_symbol == self.tokenizer.eos_token
+        ):
+            self.is_bow_tokenizer = False
         else:
-            is_bow_tokenizer = True
+            self.is_bow_tokenizer = True
 
-        if is_bow_tokenizer:
+        if self.is_bow_tokenizer:
             self.bow_subwords = defaultdict(lambda: False)
             for word, idx in self.tokenizer.get_vocab().items():
                 if word[0] == self.bow_symbol:
@@ -1798,10 +1805,11 @@ class IncrementalLMScorer(LMScorer):
                 ].tolist()
                 ranks.append(word_ranks)
 
-                scores.append(score)
+            scores.append(score)
 
-        if return_tensors:
-            scores = [torch.tensor(l) for l in scores]
+        if not return_tensors:
+            # scores = [torch.tensor(l).detach() for l in scores]
+            scores = [s.tolist() for s in scores]
 
         if rank:
             return scores, ranks
@@ -2850,15 +2858,22 @@ class MambaScorer(LMScorer):
 
         self.padding_side = self.tokenizer.padding_side
 
-        self.bow_symbol = self.tokenizer.convert_ids_to_tokens(
-            self.tokenizer(" ").input_ids[0]
-        )
-        if self.bow_symbol == self.bos_token or self.bow_symbol is None or self.bow_symbol == self.eos_token:
-            is_bow_tokenizer = False
+        try:
+            self.bow_symbol = self.tokenizer.convert_ids_to_tokens(
+                self.tokenizer(" ", add_special_tokens=False).input_ids[0]
+            )
+        except:
+            self.bow_symbol = None
+        if (
+            self.bow_symbol == self.tokenizer.bos_token
+            or self.bow_symbol is None
+            or self.bow_symbol == self.tokenizer.eos_token
+        ):
+            self.is_bow_tokenizer = False
         else:
-            is_bow_tokenizer = True
+            self.is_bow_tokenizer = True
 
-        if is_bow_tokenizer:
+        if self.is_bow_tokenizer:
             self.bow_subwords = defaultdict(lambda: False)
             for word, idx in self.tokenizer.get_vocab().items():
                 if word[0] == self.bow_symbol:
@@ -3180,10 +3195,11 @@ class MambaScorer(LMScorer):
                 ].tolist()
                 ranks.append(word_ranks)
 
-                scores.append(score)
+            scores.append(score)
 
-        if return_tensors:
-            scores = [torch.tensor(l) for l in scores]
+        if not return_tensors:
+            # scores = [torch.tensor(l).detach() for l in scores]
+            scores = [s.tolist() for s in scores]
 
         if rank:
             return scores, ranks
@@ -3362,15 +3378,23 @@ class VLMScorer(LMScorer):
         if isinstance(model, str):
             self.model.eval()
 
-        self.bow_symbol = self.tokenizer.convert_ids_to_tokens(
-            self.tokenizer(" ").input_ids[0]
-        )
-        if self.bow_symbol == self.bos_token or self.bow_symbol is None or self.bow_symbol == self.eos_token:
-            is_bow_tokenizer = False
-        else:
-            is_bow_tokenizer = True
+        try:
+            self.bow_symbol = self.tokenizer.convert_ids_to_tokens(
+                self.tokenizer(" ", add_special_tokens=False).input_ids[0]
+            )
+        except:
+            self.bow_symbol = None
 
-        if is_bow_tokenizer:
+        if (
+            self.bow_symbol == self.tokenizer.bos_token
+            or self.bow_symbol is None
+            or self.bow_symbol == self.tokenizer.eos_token
+        ):
+            self.is_bow_tokenizer = False
+        else:
+            self.is_bow_tokenizer = True
+
+        if self.is_bow_tokenizer:
             self.bow_subwords = defaultdict(lambda: False)
             for word, idx in self.tokenizer.get_vocab().items():
                 if word[0] == self.bow_symbol:
@@ -3679,10 +3703,11 @@ class VLMScorer(LMScorer):
                 ].tolist()
                 ranks.append(word_ranks)
 
-                scores.append(score)
+            scores.append(score)
 
-        if return_tensors:
-            scores = [torch.tensor(l) for l in scores]
+        if not return_tensors:
+            # scores = [torch.tensor(l).detach() for l in scores]
+            scores = [s.tolist() for s in scores]
 
         if rank:
             return scores, ranks
