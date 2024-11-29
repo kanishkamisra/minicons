@@ -1094,7 +1094,7 @@ class MaskedLMScorer(LMScorer):
                 )
             sent_log_probs = (
                 sent_log_probs[torch.arange(sum(lengths)), effective_token_ids]
-                .type(torch.DoubleTensor)
+                .type(torch.Tensor)
                 .split(lengths)
             )
             # print(sent_log_probs)
@@ -1184,7 +1184,7 @@ class MaskedLMScorer(LMScorer):
             logprob_distribution[
                 torch.arange(logprob_distribution.size(0)), target_token_ids
             ]
-            .type(torch.DoubleTensor)
+            .type(torch.Tensor)
             .split(lengths)
         )
         scores = [s for s in scores]
@@ -1993,7 +1993,7 @@ class IncrementalLMScorer(LMScorer):
             # log_prob.shape = [seq_len + 1]
             sent_log_probs = sent_ids_scores - sent_logits.logsumexp(1)
 
-            sent_log_probs = sent_log_probs.type(torch.DoubleTensor)
+            sent_log_probs = sent_log_probs.type(torch.Tensor)
             sent_log_probs = sent_log_probs[offsets[sent_index] :]
             lengths = len(sent_log_probs)
             if rank:
@@ -2792,7 +2792,7 @@ class Seq2SeqScorer(LMScorer):
             # log_prob.shape = [seq_len + 1]
             sent_log_probs = sent_ids_scores - sent_logits.logsumexp(1)
 
-            sent_log_probs = sent_log_probs.type(torch.DoubleTensor)
+            sent_log_probs = sent_log_probs.type(torch.Tensor)
             sent_log_probs = sent_log_probs[offsets[sent_index] :]
             lengths = len(sent_log_probs)
             if rank:
