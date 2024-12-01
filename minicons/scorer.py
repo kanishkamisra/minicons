@@ -1776,12 +1776,12 @@ class IncrementalLMScorer(LMScorer):
                 """
                 Log_2(X) = log_e(X)/log_e(2) (broadcasted)
                 """
-                score = score / torch.tensor(2).log().tolist()
+                score = score / torch.tensor(2).log()
             else:
                 if prob:
-                    score = score.exp().tolist()
+                    score = score.exp()
                 else:
-                    score = score.tolist()
+                    score = score
 
             if rank:
                 # shape = logprob_distribution.shape
@@ -3166,12 +3166,12 @@ class MambaScorer(LMScorer):
                 """
                 Log_2(X) = log_e(X)/log_e(2) (broadcasted)
                 """
-                score = score / torch.tensor(2).log().tolist()
+                score = score / torch.tensor(2).log()
             else:
                 if prob:
-                    score = score.exp().tolist()
+                    score = score.exp()
                 else:
-                    score = score.tolist()
+                    score = score
 
             if rank:
                 # shape = logprob_distribution.shape
@@ -3674,12 +3674,12 @@ class VLMScorer(LMScorer):
                 """
                 Log_2(X) = log_e(X)/log_e(2) (broadcasted)
                 """
-                score = score / torch.tensor(2).log().tolist()
+                score = score / torch.tensor(2).log()
             else:
                 if prob:
-                    score = score.exp().tolist()
+                    score = score.exp()
                 else:
-                    score = score.tolist()
+                    score = score
 
             if rank:
                 # shape = logprob_distribution.shape
