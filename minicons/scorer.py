@@ -1455,6 +1455,11 @@ class IncrementalLMScorer(LMScorer):
                 else:
                     self.bow_subwords[idx] = False
 
+            # for cases where the model has added tokens beyond the ones it comes with
+            for idx, details in self.tokenizer.added_tokens_decoder.items():
+                if details.lstrip == True:
+                    self.bow_subword_idx[idx] = True
+
             self.bow_subwords = dict(self.bow_subwords)
             self.bow_subword_idx = [k for k, v in self.bow_subwords.items() if v]
 
@@ -2881,6 +2886,11 @@ class MambaScorer(LMScorer):
                 else:
                     self.bow_subwords[idx] = False
 
+            # for cases where the model has added tokens beyond the ones it comes with
+            for idx, details in self.tokenizer.added_tokens_decoder.items():
+                if details.lstrip == True:
+                    self.bow_subword_idx[idx] = True
+
             self.bow_subwords = dict(self.bow_subwords)
             self.bow_subword_idx = [k for k, v in self.bow_subwords.items() if v]
 
@@ -3367,6 +3377,32 @@ class VLMScorer(LMScorer):
             self.pad_token_id = self.tokenizer.tokenizer.pad_token_id
             self.eos_token_id = self.tokenizer.tokenizer.eos_token_id
             self.bos_token_id = self.tokenizer.tokenizer.bos_token_id
+            try:
+                self.bow_symbol = self.tokenizer.tokenizer.convert_ids_to_tokens(
+                    self.tokenizer.tokenizer(" ", add_special_tokens=False).input_ids[0]
+                )
+            except:
+                self.bow_symbol = None
+
+            if (
+                self.bow_symbol == self.tokenizer.tokenizer.bos_token
+                or self.bow_symbol is None
+                or self.bow_symbol == self.tokenizer.tokenizer.eos_token
+            ):
+                self.is_bow_tokenizer = False
+            else:
+                self.is_bow_tokenizer = True
+
+            if self.is_bow_tokenizer:
+                self.bow_subwords = defaultdict(lambda: False)
+                for word, idx in self.tokenizer.tokenizer.get_vocab().items():
+                    if word[0] == self.bow_symbol:
+                        self.bow_subwords[idx] = True
+                    else:
+                        self.bow_subwords[idx] = False
+
+                self.bow_subwords = dict(self.bow_subwords)
+                self.bow_subword_idx = [k for k, v in self.bow_subwords.items() if v]
         else:
             if self.tokenizer.padding_side == "left":
                 self.tokenizer.padding_side = "right"
@@ -3375,35 +3411,67 @@ class VLMScorer(LMScorer):
             self.eos_token_id = self.tokenizer.eos_token_id
             self.bos_token_id = self.tokenizer.bos_token_id
 
+            try:
+                self.bow_symbol = self.tokenizer.convert_ids_to_tokens(
+                    self.tokenizer(" ", add_special_tokens=False).input_ids[0]
+                )
+            except:
+                self.bow_symbol = None
+
+            if (
+                self.bow_symbol == self.tokenizer.bos_token
+                or self.bow_symbol is None
+                or self.bow_symbol == self.tokenizer.eos_token
+            ):
+                self.is_bow_tokenizer = False
+            else:
+                self.is_bow_tokenizer = True
+
+            if self.is_bow_tokenizer:
+                self.bow_subwords = defaultdict(lambda: False)
+                for word, idx in self.tokenizer.get_vocab().items():
+                    if word[0] == self.bow_symbol:
+                        self.bow_subwords[idx] = True
+                    else:
+                        self.bow_subwords[idx] = False
+
+                # for cases where the model has added tokens beyond the ones it comes with
+                for idx, details in self.tokenizer.added_tokens_decoder.items():
+                    if details.lstrip == True:
+                        self.bow_subword_idx[idx] = True
+
+                self.bow_subwords = dict(self.bow_subwords)
+                self.bow_subword_idx = [k for k, v in self.bow_subwords.items() if v]
+
         if isinstance(model, str):
             self.model.eval()
 
-        try:
-            self.bow_symbol = self.tokenizer.convert_ids_to_tokens(
-                self.tokenizer(" ", add_special_tokens=False).input_ids[0]
-            )
-        except:
-            self.bow_symbol = None
+        # try:
+        #     self.bow_symbol = self.tokenizer.convert_ids_to_tokens(
+        #         self.tokenizer(" ", add_special_tokens=False).input_ids[0]
+        #     )
+        # except:
+        #     self.bow_symbol = None
 
-        if (
-            self.bow_symbol == self.tokenizer.bos_token
-            or self.bow_symbol is None
-            or self.bow_symbol == self.tokenizer.eos_token
-        ):
-            self.is_bow_tokenizer = False
-        else:
-            self.is_bow_tokenizer = True
+        # if (
+        #     self.bow_symbol == self.tokenizer.bos_token
+        #     or self.bow_symbol is None
+        #     or self.bow_symbol == self.tokenizer.eos_token
+        # ):
+        #     self.is_bow_tokenizer = False
+        # else:
+        #     self.is_bow_tokenizer = True
 
-        if self.is_bow_tokenizer:
-            self.bow_subwords = defaultdict(lambda: False)
-            for word, idx in self.tokenizer.get_vocab().items():
-                if word[0] == self.bow_symbol:
-                    self.bow_subwords[idx] = True
-                else:
-                    self.bow_subwords[idx] = False
+        # if self.is_bow_tokenizer:
+        #     self.bow_subwords = defaultdict(lambda: False)
+        #     for word, idx in self.tokenizer.get_vocab().items():
+        #         if word[0] == self.bow_symbol:
+        #             self.bow_subwords[idx] = True
+        #         else:
+        #             self.bow_subwords[idx] = False
 
-            self.bow_subwords = dict(self.bow_subwords)
-            self.bow_subword_idx = [k for k, v in self.bow_subwords.items() if v]
+        #     self.bow_subwords = dict(self.bow_subwords)
+        #     self.bow_subword_idx = [k for k, v in self.bow_subwords.items() if v]
 
     def encode(self, text: Union[str, List[str]], image=None) -> BatchEncoding:
         # def _format(self, text, image, bos, eos):
