@@ -1458,7 +1458,7 @@ class IncrementalLMScorer(LMScorer):
             # for cases where the model has added tokens beyond the ones it comes with
             for idx, details in self.tokenizer.added_tokens_decoder.items():
                 if details.lstrip == True:
-                    self.bow_subword_idx[idx] = True
+                    self.bow_subwords[idx] = True
 
             self.bow_subwords = dict(self.bow_subwords)
             self.bow_subword_idx = [k for k, v in self.bow_subwords.items() if v]
@@ -1753,7 +1753,9 @@ class IncrementalLMScorer(LMScorer):
                         mask_current[i] = 1
 
                 mask_forward = mask_forward[offset:]
-                mask_current = mask_current[offset:]
+                # mask_current = mask_current[offset:]
+                mask_current = torch.roll(mask_forward, shifts=1)
+                mask_current[0] = 0.0
 
                 bow_subword_idx_tensor = torch.tensor(self.bow_subword_idx).to(
                     self.device
@@ -2889,7 +2891,7 @@ class MambaScorer(LMScorer):
             # for cases where the model has added tokens beyond the ones it comes with
             for idx, details in self.tokenizer.added_tokens_decoder.items():
                 if details.lstrip == True:
-                    self.bow_subword_idx[idx] = True
+                    self.bow_subwords[idx] = True
 
             self.bow_subwords = dict(self.bow_subwords)
             self.bow_subword_idx = [k for k, v in self.bow_subwords.items() if v]
@@ -3148,7 +3150,9 @@ class MambaScorer(LMScorer):
                         mask_current[i] = 1
 
                 mask_forward = mask_forward[offset:]
-                mask_current = mask_current[offset:]
+                # mask_current = mask_current[offset:]
+                mask_current = torch.roll(mask_forward, shifts=1)
+                mask_current[0] = 0.0
 
                 bow_subword_idx_tensor = torch.tensor(self.bow_subword_idx).to(
                     self.device
@@ -3438,7 +3442,7 @@ class VLMScorer(LMScorer):
                 # for cases where the model has added tokens beyond the ones it comes with
                 for idx, details in self.tokenizer.added_tokens_decoder.items():
                     if details.lstrip == True:
-                        self.bow_subword_idx[idx] = True
+                        self.bow_subwords[idx] = True
 
                 self.bow_subwords = dict(self.bow_subwords)
                 self.bow_subword_idx = [k for k, v in self.bow_subwords.items() if v]
@@ -3714,7 +3718,9 @@ class VLMScorer(LMScorer):
                         mask_current[i] = 1
 
                 mask_forward = mask_forward[offset:]
-                mask_current = mask_current[offset:]
+                # mask_current = mask_current[offset:]
+                mask_current = torch.roll(mask_forward, shifts=1)
+                mask_current[0] = 0.0
 
                 bow_subword_idx_tensor = torch.tensor(self.bow_subword_idx).to(
                     self.device
