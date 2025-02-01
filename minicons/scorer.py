@@ -1544,9 +1544,9 @@ class IncrementalLMScorer(LMScorer):
         self,
         preamble: Union[str, List[str]],
         stimuli: Union[str, List[str]],
-        separator=" ",
-        bos_token=False,
-        eos_token=False,
+        separator: Union[str, List[str]]=" ",
+        bos_token: bool=False,
+        eos_token: bool=False,
     ) -> Tuple:
         """
         Prepares a batch of input text into a format fit to run LM
@@ -1574,11 +1574,18 @@ class IncrementalLMScorer(LMScorer):
                 + bos_offset
             )
 
-        sentences = (
-            [preamble + separator + stimuli]
-            if isinstance(preamble, str)
-            else [p + separator + s for p, s in list(zip(preamble, stimuli))]
-        )
+        if isinstance(separator, str):
+            sentences = (
+                [preamble + separator + stimuli]
+                if isinstance(preamble, str)
+                else [p + separator + s for p, s in list(zip(preamble, stimuli))]
+            )
+            
+        elif isinstance(separator, list):
+            assert not isinstance(preamble, str)
+            assert len(preamble) == len(separator) == len(stimuli)
+            
+            sentences = [p + sep + s for p, sep, s in list(zip(preamble, separator, stimuli))]
 
         return self.encode(sentences, bos_token, eos_token), preamble_lens
 
@@ -2943,7 +2950,7 @@ class MambaScorer(LMScorer):
         self,
         preamble: Union[str, List[str]],
         stimuli: Union[str, List[str]],
-        separator=" ",
+        separator: Union[str, List[str]]=" ",
         bos_token=False,
         eos_token=False,
     ) -> Tuple:
@@ -2973,11 +2980,18 @@ class MambaScorer(LMScorer):
                 + bos_offset
             )
 
-        sentences = (
-            [preamble + separator + stimuli]
-            if isinstance(preamble, str)
-            else [p + separator + s for p, s in list(zip(preamble, stimuli))]
-        )
+        if isinstance(separator, str):
+            sentences = (
+                [preamble + separator + stimuli]
+                if isinstance(preamble, str)
+                else [p + separator + s for p, s in list(zip(preamble, stimuli))]
+            )
+            
+        elif isinstance(separator, list):
+            assert not isinstance(preamble, str)
+            assert len(preamble) == len(separator) == len(stimuli)
+            
+            sentences = [p + sep + s for p, sep, s in list(zip(preamble, separator, stimuli))]
 
         return self.encode(sentences, bos_token, eos_token), preamble_lens
 
@@ -3557,7 +3571,7 @@ class VLMScorer(LMScorer):
         preamble: Union[str, List[str]],
         stimuli: Union[str, List[str]],
         image=None,
-        separator=" ",
+        separator: Union[str, List[str]]=" ",
     ) -> Tuple:
         """
         Prepares a batch of input text into a format fit to run LM
@@ -3583,11 +3597,18 @@ class VLMScorer(LMScorer):
                 + bos_offset
             )
 
-        sentences = (
-            [preamble + separator + stimuli]
-            if isinstance(preamble, str)
-            else [p + separator + s for p, s in list(zip(preamble, stimuli))]
-        )
+        if isinstance(separator, str):
+            sentences = (
+                [preamble + separator + stimuli]
+                if isinstance(preamble, str)
+                else [p + separator + s for p, s in list(zip(preamble, stimuli))]
+            )
+            
+        elif isinstance(separator, list):
+            assert not isinstance(preamble, str)
+            assert len(preamble) == len(separator) == len(stimuli)
+            
+            sentences = [p + sep + s for p, sep, s in list(zip(preamble, separator, stimuli))]
 
         return self.encode(sentences, image), preamble_lens
 
