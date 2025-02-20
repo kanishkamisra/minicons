@@ -1512,7 +1512,10 @@ class IncrementalLMScorer(LMScorer):
 
         text = [text] if isinstance(text, str) else text
         text = [_format(self, t, bos_token, eos_token) for t in text]
-        encoded = self.tokenizer(text, return_tensors="pt", padding=True)
+        if self.tokenizer.chat_template is None:
+            encoded = self.tokenizer(text, return_tensors="pt", padding=True)
+        else:
+            encoded = self.tokenizer(text, return_tensors="pt", padding=True, add_special_tokens=False)
         if "token_type_ids" in encoded.keys():
             encoded.pop("token_type_ids")
 
@@ -2918,7 +2921,10 @@ class MambaScorer(LMScorer):
 
         text = [text] if isinstance(text, str) else text
         text = [_format(self, t, bos_token, eos_token) for t in text]
-        encoded = self.tokenizer(text, return_tensors="pt", padding=True)
+        if self.tokenizer.chat_template is None:
+            encoded = self.tokenizer(text, return_tensors="pt", padding=True)
+        else:
+            encoded = self.tokenizer(text, return_tensors="pt", padding=True, add_special_tokens=False)
         if "token_type_ids" in encoded.keys():
             encoded.pop("token_type_ids")
 
