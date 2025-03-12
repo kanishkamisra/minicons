@@ -1502,6 +1502,7 @@ class IncrementalLMScorer(LMScorer):
         text: Union[str, List[str]],
         bos_token: bool = False,
         eos_token: bool = False,
+        chat: bool = False,
     ) -> BatchEncoding:
         def _format(self, text, bos, eos):
             if bos:
@@ -1512,10 +1513,16 @@ class IncrementalLMScorer(LMScorer):
 
         text = [text] if isinstance(text, str) else text
         text = [_format(self, t, bos_token, eos_token) for t in text]
-        if self.tokenizer.chat_template is None:
-            encoded = self.tokenizer(text, return_tensors="pt", padding=True)
+        if chat == True:
+            if self.tokenizer.chat_template is not None:
+                encoded = self.tokenizer(
+                    text, return_tensors="pt", padding=True, add_special_tokens=False
+                )
+            else:
+                raise ValueError("Chat is set to True but the model does not have a chat template.")
         else:
-            encoded = self.tokenizer(text, return_tensors="pt", padding=True, add_special_tokens=False)
+            encoded = self.tokenizer(text, return_tensors="pt", padding=True)
+
         if "token_type_ids" in encoded.keys():
             encoded.pop("token_type_ids")
 
@@ -1526,6 +1533,7 @@ class IncrementalLMScorer(LMScorer):
         text: Union[str, List[str], BatchEncoding],
         bos_token: bool = False,
         eos_token: bool = False,
+        chat: bool = False,
     ) -> Tuple:
         """
         Prepares a batch of input text into a format fit to run LM
@@ -1539,7 +1547,7 @@ class IncrementalLMScorer(LMScorer):
         if isinstance(text, BatchEncoding):
             encoded = text
         else:
-            encoded = self.encode(text, bos_token, eos_token)
+            encoded = self.encode(text, bos_token, eos_token, chat)
         offsets = [0] * len(encoded["input_ids"])
         return encoded, offsets
 
@@ -1547,9 +1555,10 @@ class IncrementalLMScorer(LMScorer):
         self,
         preamble: Union[str, List[str]],
         stimuli: Union[str, List[str]],
-        separator: Union[str, List[str]]=" ",
-        bos_token: bool=False,
-        eos_token: bool=False,
+        separator: Union[str, List[str]] = " ",
+        bos_token: bool = False,
+        eos_token: bool = False,
+        chat: bool = False,
     ) -> Tuple:
         """
         Prepares a batch of input text into a format fit to run LM
@@ -1562,7 +1571,15 @@ class IncrementalLMScorer(LMScorer):
             ``compute_stats``
         """
         preamble_text = [preamble] if isinstance(preamble, str) else preamble
-        preamble_encoded = self.tokenizer(preamble_text)["input_ids"]
+        if chat == True:
+            if self.tokenizer.chat_template is not None:
+                preamble_encoded = self.tokenizer(
+                    preamble_text, add_special_tokens=False
+                )["input_ids"]
+            else:
+                raise ValueError("Chat is set to True but the model does not have a chat template.")
+        else:
+            preamble_encoded = self.tokenizer(preamble_text)["input_ids"]
         preamble_lens = []
         for preamble_tokens in preamble_encoded:
             if bos_token:
@@ -1583,14 +1600,16 @@ class IncrementalLMScorer(LMScorer):
                 if isinstance(preamble, str)
                 else [p + separator + s for p, s in list(zip(preamble, stimuli))]
             )
-            
+
         elif isinstance(separator, list):
             assert not isinstance(preamble, str)
             assert len(preamble) == len(separator) == len(stimuli)
-            
-            sentences = [p + sep + s for p, sep, s in list(zip(preamble, separator, stimuli))]
 
-        return self.encode(sentences, bos_token, eos_token), preamble_lens
+            sentences = [
+                p + sep + s for p, sep, s in list(zip(preamble, separator, stimuli))
+            ]
+
+        return self.encode(sentences, bos_token, eos_token, chat), preamble_lens
 
     def distribution(self, batch: Iterable) -> torch.Tensor:
         """
@@ -2924,7 +2943,9 @@ class MambaScorer(LMScorer):
         if self.tokenizer.chat_template is None:
             encoded = self.tokenizer(text, return_tensors="pt", padding=True)
         else:
-            encoded = self.tokenizer(text, return_tensors="pt", padding=True, add_special_tokens=False)
+            encoded = self.tokenizer(
+                text, return_tensors="pt", padding=True, add_special_tokens=False
+            )
         if "token_type_ids" in encoded.keys():
             encoded.pop("token_type_ids")
 
@@ -2956,7 +2977,7 @@ class MambaScorer(LMScorer):
         self,
         preamble: Union[str, List[str]],
         stimuli: Union[str, List[str]],
-        separator: Union[str, List[str]]=" ",
+        separator: Union[str, List[str]] = " ",
         bos_token=False,
         eos_token=False,
     ) -> Tuple:
@@ -2992,12 +3013,14 @@ class MambaScorer(LMScorer):
                 if isinstance(preamble, str)
                 else [p + separator + s for p, s in list(zip(preamble, stimuli))]
             )
-            
+
         elif isinstance(separator, list):
             assert not isinstance(preamble, str)
             assert len(preamble) == len(separator) == len(stimuli)
-            
-            sentences = [p + sep + s for p, sep, s in list(zip(preamble, separator, stimuli))]
+
+            sentences = [
+                p + sep + s for p, sep, s in list(zip(preamble, separator, stimuli))
+            ]
 
         return self.encode(sentences, bos_token, eos_token), preamble_lens
 
@@ -3577,7 +3600,7 @@ class VLMScorer(LMScorer):
         preamble: Union[str, List[str]],
         stimuli: Union[str, List[str]],
         image=None,
-        separator: Union[str, List[str]]=" ",
+        separator: Union[str, List[str]] = " ",
     ) -> Tuple:
         """
         Prepares a batch of input text into a format fit to run LM
@@ -3609,12 +3632,14 @@ class VLMScorer(LMScorer):
                 if isinstance(preamble, str)
                 else [p + separator + s for p, s in list(zip(preamble, stimuli))]
             )
-            
+
         elif isinstance(separator, list):
             assert not isinstance(preamble, str)
             assert len(preamble) == len(separator) == len(stimuli)
-            
-            sentences = [p + sep + s for p, sep, s in list(zip(preamble, separator, stimuli))]
+
+            sentences = [
+                p + sep + s for p, sep, s in list(zip(preamble, separator, stimuli))
+            ]
 
         return self.encode(sentences, image), preamble_lens
 
