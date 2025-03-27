@@ -150,7 +150,7 @@ class LMScorer:
             maxlen = max(map(len, query_ids))
             query_ids = [
                 (
-                    q + [self.tokenizer.pad_token_id] * (maxlen - len(q))
+                    q + [self.pad_token_id] * (maxlen - len(q))
                     if len(q) < maxlen
                     else q
                 )
@@ -1431,11 +1431,14 @@ class IncrementalLMScorer(LMScorer):
 
         self.padding_side = self.tokenizer.padding_side
 
+        self.padding_side = self.tokenizer.padding_side
+        self.pad_token_id = self.tokenizer.pad_token_id
+
         # bow_subtokens, but only if the model has a
         try:
             self.bow_symbol = self.tokenizer.convert_ids_to_tokens(
                 self.tokenizer(" ", add_special_tokens=False).input_ids[0]
-            )
+            )[0] # sometimes this trick returns <bow_symbol><space>, in models like llava
         except:
             self.bow_symbol = None
         if (
@@ -1649,7 +1652,7 @@ class IncrementalLMScorer(LMScorer):
             sent_ids = ids[sent_index, sent_nopad_mask][1:]
             # logits.shape = [len(text[sent_index]) + 1, vocab_size]
             sent_logits = logits[sent_index, sent_nopad_mask][:-1, :]
-            sent_logits[:, self.tokenizer.pad_token_id] = float("-inf")
+            # sent_logits[:, self.tokenizer.pad_token_id] = float("-inf")
 
             outputs.append(sent_logits[-1])
         return torch.stack(outputs, 0)
@@ -1670,7 +1673,7 @@ class IncrementalLMScorer(LMScorer):
 
         with torch.no_grad():
             logits = self.model(**encoded).logits.detach()
-        logits[:, :, self.tokenizer.pad_token_id] = float("-inf")
+        # logits[:, :, self.tokenizer.pad_token_id] = float("-inf")
 
         logits = logits[torch.arange(len(query_ids)), query_ids]
         logprobs = logits - logits.logsumexp(1).unsqueeze(1)
@@ -2525,7 +2528,7 @@ class Seq2SeqScorer(LMScorer):
         ]
 
         logits = self.model(**encoded).logits.detach()
-        logits[:, :, self.tokenizer.pad_token_id] = float("-inf")
+        # logits[:, :, self.tokenizer.pad_token_id] = float("-inf")
 
         logits = logits[torch.arange(len(query_ids)), query_ids]
         logprobs = logits - logits.logsumexp(1).unsqueeze(1)
@@ -2585,7 +2588,7 @@ class Seq2SeqScorer(LMScorer):
         with torch.no_grad():
             logits = self.model(input_ids=source_ids, labels=target_ids).logits.detach()
 
-        logits[:, :, self.tokenizer.pad_token_id] = float("-inf")
+        # logits[:, :, self.tokenizer.pad_token_id] = float("-inf")
 
         logits = logits.split([1] * len(target_offsets))
 
@@ -2897,7 +2900,7 @@ class MambaScorer(LMScorer):
         try:
             self.bow_symbol = self.tokenizer.convert_ids_to_tokens(
                 self.tokenizer(" ", add_special_tokens=False).input_ids[0]
-            )
+            )[0]
         except:
             self.bow_symbol = None
         if (
@@ -3062,7 +3065,7 @@ class MambaScorer(LMScorer):
             sent_ids = ids[sent_index, sent_nopad_mask][1:]
             # logits.shape = [len(text[sent_index]) + 1, vocab_size]
             sent_logits = logits[sent_index, sent_nopad_mask][:-1, :]
-            sent_logits[:, self.tokenizer.pad_token_id] = float("-inf")
+            # sent_logits[:, self.tokenizer.pad_token_id] = float("-inf")
 
             outputs.append(sent_logits[-1])
         return torch.stack(outputs, 0)
@@ -3082,7 +3085,7 @@ class MambaScorer(LMScorer):
         ]
 
         logits = self.model(encoded.input_ids).logits.detach()
-        logits[:, :, self.tokenizer.pad_token_id] = float("-inf")
+        # logits[:, :, self.tokenizer.pad_token_id] = float("-inf")
 
         logits = logits[torch.arange(len(query_ids)), query_ids]
         logprobs = logits - logits.logsumexp(1).unsqueeze(1)
@@ -3427,7 +3430,7 @@ class VLMScorer(LMScorer):
             try:
                 self.bow_symbol = self.tokenizer.tokenizer.convert_ids_to_tokens(
                     self.tokenizer.tokenizer(" ", add_special_tokens=False).input_ids[0]
-                )
+                )[0]
             except:
                 self.bow_symbol = None
 
@@ -3658,7 +3661,7 @@ class VLMScorer(LMScorer):
         ]
 
         logits = self.model(**encoded).logits.detach()
-        logits[:, :, self.pad_token_id] = float("-inf")
+        # logits[:, :, self.pad_token_id] = float("-inf")
 
         logits = logits[torch.arange(len(query_ids)), query_ids]
         logprobs = logits - logits.logsumexp(1).unsqueeze(1)
