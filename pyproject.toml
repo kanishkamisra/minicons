@@ -14,7 +14,7 @@ minicons = 'minicons.bin.score_cli:process'
 
 [tool.poetry.dependencies]
 python = ">=3.9.0,<4"
-transformers = ">=4.48.0"
+transformers = "^4.48"
 accelerate= ">=0.25.0"
 torch = "^2.0.0"
 urllib3 = "^1.26.7"
