@@ -149,11 +149,7 @@ class LMScorer:
             query_ids = [self.vocab[a] for a in querylist]
             maxlen = max(map(len, query_ids))
             query_ids = [
-                (
-                    q + [self.pad_token_id] * (maxlen - len(q))
-                    if len(q) < maxlen
-                    else q
-                )
+                (q + [self.pad_token_id] * (maxlen - len(q)) if len(q) < maxlen else q)
                 for q in query_ids
             ]
             query_logprobs = distribution[i, query_ids].max(1).values
@@ -1438,7 +1434,9 @@ class IncrementalLMScorer(LMScorer):
         try:
             self.bow_symbol = self.tokenizer.convert_ids_to_tokens(
                 self.tokenizer(" ", add_special_tokens=False).input_ids[0]
-            )[0] # sometimes this trick returns <bow_symbol><space>, in models like llava
+            )[
+                0
+            ]  # sometimes this trick returns <bow_symbol><space>, in models like llava
         except:
             self.bow_symbol = None
         if (
@@ -1522,7 +1520,9 @@ class IncrementalLMScorer(LMScorer):
                     text, return_tensors="pt", padding=True, add_special_tokens=False
                 )
             else:
-                raise ValueError("Chat is set to True but the model does not have a chat template.")
+                raise ValueError(
+                    "Chat is set to True but the model does not have a chat template."
+                )
         else:
             encoded = self.tokenizer(text, return_tensors="pt", padding=True)
 
@@ -1530,6 +1530,54 @@ class IncrementalLMScorer(LMScorer):
             encoded.pop("token_type_ids")
 
         return encoded
+
+    def word_spans_tokenized(self, batch: Iterable, tokenize_function: Callable):
+        """
+        Aligns the spans of a string tokenized by a function to
+        the tokenizer of the LM.
+
+        :param batch: batch of sentences to be prepared for scoring.
+        :param tokenize_function: the tokenizer function -- we recommend nltk.TweetTokenizer
+
+        :return: Batch of index spans and the tokenized words.
+        """
+        all_spans = []
+        all_lm_spans = []
+        words = []
+        for item in batch:
+            splitted = [tokenize_function(s) for s in item.split(" ")]
+            spans = []
+            lm_spans = []
+            start = 0
+            end = 0
+            for i, entry in enumerate(splitted):
+                end = len(entry)
+                old_end = start + end
+                spans.append((start, old_end))
+                start += end
+
+                # mapping from tokenizer spans to LM tokenizer ids
+                lm_tokenized = self.tokenizer.convert_ids_to_tokens(
+                    self.tokenizer(" ".join(entry), add_special_tokens=False)[
+                        "input_ids"
+                    ]
+                )
+                len_diff = len(lm_tokenized) - len(entry)
+                if i == 0:
+                    new_start = 0
+                else:
+                    new_start = lm_spans[i - 1][-1]
+
+                if len_diff > 0:
+                    new_end = new_start + 1 + len_diff
+                else:
+                    new_end = new_start + 1
+                lm_spans.append((new_start, new_end))
+            all_spans.append(spans)
+            all_lm_spans.append(lm_spans)
+            words.append([s[0] for s in splitted])
+
+        return all_lm_spans, words
 
     def prepare_text(
         self,
@@ -1580,7 +1628,9 @@ class IncrementalLMScorer(LMScorer):
                     preamble_text, add_special_tokens=False
                 )["input_ids"]
             else:
-                raise ValueError("Chat is set to True but the model does not have a chat template.")
+                raise ValueError(
+                    "Chat is set to True but the model does not have a chat template."
+                )
         else:
             preamble_encoded = self.tokenizer(preamble_text)["input_ids"]
         preamble_lens = []
@@ -1884,7 +1934,7 @@ class IncrementalLMScorer(LMScorer):
         prob: bool = False,
         base_two: bool = False,
         rank: bool = False,
-        decode: bool = True,
+        decode: bool = False,
         bow_correction: bool = False,
         **kwargs,
     ) -> Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]:
@@ -1979,6 +2029,139 @@ class IncrementalLMScorer(LMScorer):
                     res.append(list(zip(t, sc)))
 
         return res
+
+    def word_score_tokenized(
+        self,
+        batch: Iterable,
+        tokenize_function: Callable,
+        bow_correction: bool = False,
+        bos_token: bool = False,
+        eos_token: bool = False,
+        surprisal: bool = False,
+        prob: bool = False,
+        base_two: bool = False,
+        return_tensors: bool = False,
+    ):
+        """
+        Returns the logprobs per word, as tokenized by the tokenize_function.
+
+        :param batch: batch of sentences to be prepared for scoring.
+        :param tokenize_function: tokenize function to maps strings to tokenized words.
+        :param bow_correction: whether to apply Oh and Schuler's correction.
+        :param bos_token: if a beginning of sentence token should be added (specify this as True for GPT2 and Pythia, for other they do it by default).
+        :param eos_token: if an end of sentence token should be added
+        :param prob: if the scores should be probabilities instead of logprobabilities
+        :param base_two: if the logprobabilities should
+
+        :return: Batch of words and their corresponding log-probs (summed log-probs of the tokens)
+        """
+        batch = [batch] if isinstance(batch, str) else batch
+
+        assert not (
+            surprisal and prob
+        ), "cannot both evaluate probability and surprisal at the same time!"
+        assert not (
+            base_two and prob
+        ), "cannot both use base (which is for a log), and a probability measure at the same time!"
+
+        tokenized = [" ".join(tokenize_function(item)) for item in batch]
+
+        encoded, offsets = self.prepare_text(
+            batch, bos_token=bos_token, eos_token=eos_token
+        )
+
+        scores = self.compute_stats(
+            (encoded, offsets),
+            bow_correction=bow_correction,
+            prob=prob,
+            base_two=base_two,
+            return_tensors=True,
+        )
+
+        if surprisal:
+            scores = [-1.0 * s for s in scores]
+
+        spans, words = self.word_spans_tokenized(tokenized, tokenize_function)
+
+        word_scores = []
+        for i, span in enumerate(spans):
+            ws = []
+            for j, (s, e) in enumerate(span):
+                if prob:
+                    score = scores[i][s:e].prod()
+                else:
+                    score = scores[i][s:e].sum()
+                if not return_tensors:
+                    score = score.item()
+
+                ws.append((words[i][j], score))
+            word_scores.append(ws)
+
+        return word_scores
+
+    def conditional_word_score_tokenized(
+        self,
+        prefix,
+        stimuli,
+        tokenize_function: Callable,
+        separator=" ",
+        bow_correction=False,
+        bos_token=False,
+        eos_token=False,
+        surprisal: bool = False,
+        prob: bool = False,
+        base_two: bool = False,
+        return_tensors: bool = False,
+    ):
+
+        assert not (
+            surprisal and prob
+        ), "cannot both evaluate probability and surprisal at the same time!"
+        assert not (
+            base_two and prob
+        ), "cannot both use base (which is for a log), and a probability measure at the same time!"
+
+        prefix = [prefix] if isinstance(prefix, str) else prefix
+        stimuli = [stimuli] if isinstance(stimuli, str) else stimuli
+
+        tokenized = [" ".join(tokenize_function(item)) for item in stimuli]
+
+        encoded, offsets = self.prime_text(
+            prefix,
+            stimuli,
+            separator=separator,
+            bos_token=bos_token,
+            eos_token=eos_token,
+        )
+
+        scores = self.compute_stats(
+            (encoded, offsets),
+            bow_correction=bow_correction,
+            prob=prob,
+            base_two=base_two,
+            return_tensors=True,
+        )
+
+        if surprisal:
+            scores = [-1.0 * s for s in scores]
+
+        spans, words = self.word_spans_tokenized(tokenized, tokenize_function)
+
+        word_scores = []
+        for i, span in enumerate(spans):
+            ws = []
+            for j, (s, e) in enumerate(span):
+                if prob:
+                    score = scores[i][s:e].prod()
+                else:
+                    score = scores[i][s:e].sum()
+                if not return_tensors:
+                    score = score.item()
+
+                ws.append((words[i][j], score))
+            word_scores.append(ws)
+
+        return word_scores
 
     def logprobs(self, batch: Iterable, rank=False) -> Union[float, List[float]]:
         """
@@ -2954,6 +3137,54 @@ class MambaScorer(LMScorer):
 
         return encoded
 
+    def word_spans_tokenized(self, batch: Iterable, tokenize_function: Callable):
+        """
+        Aligns the spans of a string tokenized by a function to
+        the tokenizer of the LM.
+
+        :param batch: batch of sentences to be prepared for scoring.
+        :param tokenize_function: the tokenizer function -- we recommend nltk.TweetTokenizer
+
+        :return: Batch of index spans and the tokenized words.
+        """
+        all_spans = []
+        all_lm_spans = []
+        words = []
+        for item in batch:
+            splitted = [tokenize_function(s) for s in item.split(" ")]
+            spans = []
+            lm_spans = []
+            start = 0
+            end = 0
+            for i, entry in enumerate(splitted):
+                end = len(entry)
+                old_end = start + end
+                spans.append((start, old_end))
+                start += end
+
+                # mapping from tokenizer spans to LM tokenizer ids
+                lm_tokenized = self.tokenizer.convert_ids_to_tokens(
+                    self.tokenizer(" ".join(entry), add_special_tokens=False)[
+                        "input_ids"
+                    ]
+                )
+                len_diff = len(lm_tokenized) - len(entry)
+                if i == 0:
+                    new_start = 0
+                else:
+                    new_start = lm_spans[i - 1][-1]
+
+                if len_diff > 0:
+                    new_end = new_start + 1 + len_diff
+                else:
+                    new_end = new_start + 1
+                lm_spans.append((new_start, new_end))
+            all_spans.append(spans)
+            all_lm_spans.append(lm_spans)
+            words.append([s[0] for s in splitted])
+
+        return all_lm_spans, words
+
     def prepare_text(
         self,
         text: Union[str, List[str], BatchEncoding],
@@ -3266,6 +3497,139 @@ class MambaScorer(LMScorer):
         else:
             return scores
 
+    def word_score_tokenized(
+        self,
+        batch: Iterable,
+        tokenize_function: Callable,
+        bow_correction: bool = False,
+        bos_token: bool = False,
+        eos_token: bool = False,
+        surprisal: bool = False,
+        prob: bool = False,
+        base_two: bool = False,
+        return_tensors: bool = False,
+    ):
+        """
+        Returns the logprobs per word, as tokenized by the tokenize_function.
+
+        :param batch: batch of sentences to be prepared for scoring.
+        :param tokenize_function: tokenize function to maps strings to tokenized words.
+        :param bow_correction: whether to apply Oh and Schuler's correction.
+        :param bos_token: if a beginning of sentence token should be added (specify this as True for GPT2 and Pythia, for other they do it by default).
+        :param eos_token: if an end of sentence token should be added
+        :param prob: if the scores should be probabilities instead of logprobabilities
+        :param base_two: if the logprobabilities should
+
+        :return: Batch of words and their corresponding log-probs (summed log-probs of the tokens)
+        """
+        batch = [batch] if isinstance(batch, str) else batch
+
+        assert not (
+            surprisal and prob
+        ), "cannot both evaluate probability and surprisal at the same time!"
+        assert not (
+            base_two and prob
+        ), "cannot both use base (which is for a log), and a probability measure at the same time!"
+
+        tokenized = [" ".join(tokenize_function(item)) for item in batch]
+
+        encoded, offsets = self.prepare_text(
+            batch, bos_token=bos_token, eos_token=eos_token
+        )
+
+        scores = self.compute_stats(
+            (encoded, offsets),
+            bow_correction=bow_correction,
+            prob=prob,
+            base_two=base_two,
+            return_tensors=True,
+        )
+
+        if surprisal:
+            scores = [-1.0 * s for s in scores]
+
+        spans, words = self.word_spans_tokenized(tokenized, tokenize_function)
+
+        word_scores = []
+        for i, span in enumerate(spans):
+            ws = []
+            for j, (s, e) in enumerate(span):
+                if prob:
+                    score = scores[i][s:e].prod()
+                else:
+                    score = scores[i][s:e].sum()
+                if not return_tensors:
+                    score = score.item()
+
+                ws.append((words[i][j], score))
+            word_scores.append(ws)
+
+        return word_scores
+
+    def conditional_word_score_tokenized(
+        self,
+        prefix,
+        stimuli,
+        tokenize_function: Callable,
+        separator=" ",
+        bow_correction=False,
+        bos_token=False,
+        eos_token=False,
+        surprisal: bool = False,
+        prob: bool = False,
+        base_two: bool = False,
+        return_tensors: bool = False,
+    ):
+
+        assert not (
+            surprisal and prob
+        ), "cannot both evaluate probability and surprisal at the same time!"
+        assert not (
+            base_two and prob
+        ), "cannot both use base (which is for a log), and a probability measure at the same time!"
+
+        prefix = [prefix] if isinstance(prefix, str) else prefix
+        stimuli = [stimuli] if isinstance(stimuli, str) else stimuli
+
+        tokenized = [" ".join(tokenize_function(item)) for item in stimuli]
+
+        encoded, offsets = self.prime_text(
+            prefix,
+            stimuli,
+            separator=separator,
+            bos_token=bos_token,
+            eos_token=eos_token,
+        )
+
+        scores = self.compute_stats(
+            (encoded, offsets),
+            bow_correction=bow_correction,
+            prob=prob,
+            base_two=base_two,
+            return_tensors=True,
+        )
+
+        if surprisal:
+            scores = [-1.0 * s for s in scores]
+
+        spans, words = self.word_spans_tokenized(tokenized, tokenize_function)
+
+        word_scores = []
+        for i, span in enumerate(spans):
+            ws = []
+            for j, (s, e) in enumerate(span):
+                if prob:
+                    score = scores[i][s:e].prod()
+                else:
+                    score = scores[i][s:e].sum()
+                if not return_tensors:
+                    score = score.item()
+
+                ws.append((words[i][j], score))
+            word_scores.append(ws)
+
+        return word_scores
+
     def sequence_score(
         self,
         batch,
@@ -3295,7 +3659,7 @@ class MambaScorer(LMScorer):
         prob: bool = False,
         base_two: bool = False,
         rank: bool = False,
-        decode: bool = True,
+        decode: bool = False,
         bow_correction: bool = False,
         **kwargs,
     ) -> Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]:
