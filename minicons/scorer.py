@@ -1556,9 +1556,13 @@ class IncrementalLMScorer(LMScorer):
                 spans.append((start, old_end))
                 start += end
 
+                joined = ' '.join(entry)
+                if i != 0:
+                    joined = f' {joined}'
+
                 # mapping from tokenizer spans to LM tokenizer ids
                 lm_tokenized = self.tokenizer.convert_ids_to_tokens(
-                    self.tokenizer(" ".join(entry), add_special_tokens=False)[
+                    self.tokenizer(joined, add_special_tokens=False)[
                         "input_ids"
                     ]
                 )
@@ -3162,12 +3166,17 @@ class MambaScorer(LMScorer):
                 spans.append((start, old_end))
                 start += end
 
+                joined = ' '.join(entry)
+                if i != 0:
+                    joined = f' {joined}'
+
                 # mapping from tokenizer spans to LM tokenizer ids
                 lm_tokenized = self.tokenizer.convert_ids_to_tokens(
-                    self.tokenizer(" ".join(entry), add_special_tokens=False)[
+                    self.tokenizer(joined, add_special_tokens=False)[
                         "input_ids"
                     ]
                 )
+                
                 len_diff = len(lm_tokenized) - len(entry)
                 if i == 0:
                     new_start = 0
