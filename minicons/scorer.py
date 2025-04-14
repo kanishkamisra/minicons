@@ -968,7 +968,7 @@ class MaskedLMScorer(LMScorer):
         )
         # splits = [prompt.split(word) for prompt, word in zip(modified_prompts, words)]
         splits = [
-            re.split(rf"\b{word}\b", prompt)
+            re.split(rf"{re.escape(word)}", prompt)
             for prompt, word in zip(modified_prompts, words)
         ]
         splits = [[x.strip() for x in s] for s in splits]
@@ -1545,7 +1545,12 @@ class IncrementalLMScorer(LMScorer):
         all_lm_spans = []
         words = []
         for item in batch:
-            splitted = [tokenize_function(s) for s in item.split(" ")]
+            # splitted = [tokenize_function(s) for s in item.split(" ")]
+            if isinstance(tokenize_function, Callable):
+                splitted = [tokenize_function(s) for s in item.split(" ")]
+            else:
+                splitted = tokenize_function[idx]
+            words.append([" ".join(s) for s in splitted])
             spans = []
             lm_spans = []
             start = 0
@@ -1579,7 +1584,7 @@ class IncrementalLMScorer(LMScorer):
                 lm_spans.append((new_start, new_end))
             all_spans.append(spans)
             all_lm_spans.append(lm_spans)
-            words.append([s[0] for s in splitted])
+            # words.append([s[0] for s in splitted])
 
         return all_lm_spans, words
 
@@ -2128,7 +2133,13 @@ class IncrementalLMScorer(LMScorer):
         prefix = [prefix] if isinstance(prefix, str) else prefix
         stimuli = [stimuli] if isinstance(stimuli, str) else stimuli
 
-        tokenized = [" ".join(tokenize_function(item)) for item in stimuli]
+        if isinstance(tokenize_function, Callable):
+            tokenized = [" ".join(tokenize_function(item)) for item in stimuli]
+        elif isinstance(tokenize_function, list):
+            tokenize_function = [[[tt] for tt in t] for t in tokenize_function]
+            tokenized = [" ".join([tt[0] for tt in t]) for t in tokenize_function]
+        else:
+            raise ValueError("Incorrect type of tokenize_function argument (either callable or list)")
 
         encoded, offsets = self.prime_text(
             prefix,
@@ -3155,7 +3166,12 @@ class MambaScorer(LMScorer):
         all_lm_spans = []
         words = []
         for item in batch:
-            splitted = [tokenize_function(s) for s in item.split(" ")]
+            # splitted = [tokenize_function(s) for s in item.split(" ")]
+            if isinstance(tokenize_function, Callable):
+                splitted = [tokenize_function(s) for s in item.split(" ")]
+            else:
+                splitted = tokenize_function[idx]
+            words.append([" ".join(s) for s in splitted])
             spans = []
             lm_spans = []
             start = 0
@@ -3176,7 +3192,6 @@ class MambaScorer(LMScorer):
                         "input_ids"
                     ]
                 )
-                
                 len_diff = len(lm_tokenized) - len(entry)
                 if i == 0:
                     new_start = 0
@@ -3190,7 +3205,7 @@ class MambaScorer(LMScorer):
                 lm_spans.append((new_start, new_end))
             all_spans.append(spans)
             all_lm_spans.append(lm_spans)
-            words.append([s[0] for s in splitted])
+            # words.append([s[0] for s in splitted])
 
         return all_lm_spans, words
 
@@ -3600,7 +3615,14 @@ class MambaScorer(LMScorer):
         prefix = [prefix] if isinstance(prefix, str) else prefix
         stimuli = [stimuli] if isinstance(stimuli, str) else stimuli
 
-        tokenized = [" ".join(tokenize_function(item)) for item in stimuli]
+        # tokenized = [" ".join(tokenize_function(item)) for item in stimuli]
+        if isinstance(tokenize_function, Callable):
+            tokenized = [" ".join(tokenize_function(item)) for item in stimuli]
+        elif isinstance(tokenize_function, list):
+            tokenize_function = [[[tt] for tt in t] for t in tokenize_function]
+            tokenized = [" ".join([tt[0] for tt in t]) for t in tokenize_function]
+        else:
+            raise ValueError("Incorrect type of tokenize_function argument (either callable or list)")
 
         encoded, offsets = self.prime_text(
             prefix,
