@@ -89,8 +89,8 @@ class CWE(object):
 
         self.leading_whitespace_behavior = leading_whitespace_behavior(self.tokenizer)
 
-        if self.processor.tokenizer.padding_side == "left":
-            self.processor.tokenizer.padding_side = "right"
+        if self.tokenizer.padding_side == "left":
+            self.tokenizer.padding_side = "right"
 
         self.model.to(self.device)
         self.model.eval()
