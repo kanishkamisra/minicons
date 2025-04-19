@@ -45,12 +45,30 @@ def character_span(sentence, word):
     return idx, idx + len(word)
 
 
-def find_pattern(pieces: List, whole: List) -> Tuple[int, int]:
+# def find_pattern(pieces: List, whole: List) -> Tuple[int, int]:
+#     num_pieces = len(pieces)
+#     result = (0, 0)
+#     for i in (j for j, entry in enumerate(whole) if entry == pieces[0]):
+#         if whole[i : i + num_pieces] == pieces:
+#             result = (i, i + num_pieces)
+#     return result
+
+def find_pattern(pieces: List, whole: List, multi_strategy='last') -> List[Tuple[int, int]]:
     num_pieces = len(pieces)
-    result = (0, 0)
+    indices = []
     for i in (j for j, entry in enumerate(whole) if entry == pieces[0]):
         if whole[i : i + num_pieces] == pieces:
-            result = (i, i + num_pieces)
+            indices.append((i, i + num_pieces))
+            
+    if multi_strategy == "last":
+        result = [indices[-1]]
+    elif multi_strategy == "first":
+        result = [indices[0]]
+    elif multi_strategy == "all":
+        result = indices
+    else:
+        raise ValueError("unrecognizable argument passed to multi_strategy (last/first/all)")
+
     return result
 
 
@@ -172,3 +190,11 @@ def leading_whitespace_behavior(tokenizer, n_random_words=1000):
         return "llama-mixed"  # Generally like Llama tokenizer behavior, but not 100%
     else:
         return "llama"  # tokenizers like the Llama Tokenizer seem to generally encode "word" as [token_ID1] and " word" as [whitespace_ID, tokenID_1]. The encoding "something something word something" is likely to include tokenID_1.
+
+def index_states(hidden_states, num_inputs, query_ids):
+    layer_reps = []
+    for i, hs in enumerate(hidden_states.split([1] * num_inputs)):
+        idx = query_ids[i]
+        embs = torch.stack([hs.squeeze()[idxes[0]: idxes[1]].mean(0) for idxes in idx])
+        layer_reps.append(embs)
+    return layer_reps
