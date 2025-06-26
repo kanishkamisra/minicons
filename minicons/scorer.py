@@ -1717,12 +1717,12 @@ class IncrementalLMScorer(LMScorer):
         return torch.stack(outputs, 0)
 
     def next_word_distribution(
-        self, queries: List, bos_token=False, eos_token=False, surprisal: bool = False
+        self, queries: List, bos_token=False, eos_token=False, surprisal: bool = False, chat: bool = False
     ):
         """
         Returns the log probability distribution of the next word.
         """
-        encoded = self.encode(queries, bos_token, eos_token)
+        encoded = self.encode(queries, bos_token, eos_token, chat=chat)
         if self.device != "auto":
             encoded = encoded.to(self.device)
         query_ids = [
