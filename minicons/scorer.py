@@ -28,7 +28,7 @@ from transformers import (
     BatchEncoding,
     AutoProcessor,
     AutoModelForVision2Seq,
-    AutoModelForVisionTextToText
+    AutoModelForImageTextToText
 )
 
 from PIL import Image
@@ -3806,7 +3806,7 @@ class VLMScorer(LMScorer):
                 self.tokenizer = AutoProcessor.from_pretrained(model, **kwargs)
                 if self.device == "auto":
                     try:
-                        self.model = AutoModelForVisionTextToText.from_pretrained(
+                        self.model = AutoModelForImageTextToText.from_pretrained(
                             model, device_map=self.device, **kwargs
                         )
                     except:
@@ -3815,7 +3815,7 @@ class VLMScorer(LMScorer):
                         )
                 else:
                     try:
-                        self.model = AutoModelForVisionTextToText.from_pretrained(
+                        self.model = AutoModelForImageTextToText.from_pretrained(
                             model, **kwargs
                         )
                     except:
