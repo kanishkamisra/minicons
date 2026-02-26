@@ -27,7 +27,6 @@ from transformers import (
     AutoTokenizer,
     BatchEncoding,
     AutoProcessor,
-    AutoModelForVision2Seq,
     AutoModelForImageTextToText
 )
 
@@ -3805,21 +3804,13 @@ class VLMScorer(LMScorer):
             else:
                 self.tokenizer = AutoProcessor.from_pretrained(model, **kwargs)
                 if self.device == "auto":
-                    try:
-                        self.model = AutoModelForImageTextToText.from_pretrained(
-                            model, device_map=self.device, **kwargs
-                        )
-                    except:
-                        self.model = AutoModelForVision2Seq.from_pretrained(
-                            model, device_map=self.device, **kwargs
-                        )
+                    self.model = AutoModelForImageTextToText.from_pretrained(
+                        model, device_map=self.device, **kwargs
+                    )
                 else:
-                    try:
-                        self.model = AutoModelForImageTextToText.from_pretrained(
-                            model, **kwargs
-                        )
-                    except:
-                        self.model = AutoModelForVision2Seq.from_pretrained(model, **kwargs)
+                    self.model = AutoModelForImageTextToText.from_pretrained(
+                        model, **kwargs
+                    )
         else:
             self.model = model
 
