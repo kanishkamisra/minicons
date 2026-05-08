@@ -15,7 +15,7 @@ from transformers import (
     AutoModel,
     AutoTokenizer,
     AutoConfig,
-    AutoModelForVision2Seq,
+    AutoModelForImageTextToText,
     AutoProcessor,
 )
 from transformers.utils.logging import set_verbosity_error
@@ -78,7 +78,10 @@ class CWE(object):
             self.model = AutoModel.from_config(self.config)
         self.dimensions = list(self.model.parameters())[-1].shape[0]
 
-        self.layers = self.model.config.num_hidden_layers
+        try:
+            self.layers = self.model.config.num_hidden_layers
+        except:
+            self.layers = self.model.config.text_config.num_hidden_layers
 
         if self.tokenizer.pad_token is None:
             self.tokenizer.add_special_tokens(
@@ -675,7 +678,7 @@ class VisualCWE(CWE):
             model_name, use_fast=True, **kwargs
         )
         self.model_name = model_name
-        self.model = AutoModelForVision2Seq.from_pretrained(
+        self.model = AutoModelForImageTextToText.from_pretrained(
             model_name, output_hidden_states=True, **kwargs
         )
 
