@@ -212,7 +212,7 @@ class CWE(object):
         for s, idx in sentences:
             if 0 in idx:
                 search_queries.append(
-                    self.tokenizer.encode_plus(
+                    self.tokenizer(
                         f"{s[idx[0]:idx[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
@@ -220,14 +220,14 @@ class CWE(object):
                 self.leading_whitespace_behavior == "llama"
             ):  ## Seems like the GPT2 approach really fails w Llama's tokenizer
                 search_queries.append(
-                    self.tokenizer.encode_plus(
+                    self.tokenizer(
                         f"{s[idx[0]:idx[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
             elif self.leading_whitespace_behavior == "gpt2":
                 ## this one really matters if we are using GPT2
                 search_queries.append(
-                    self.tokenizer.encode_plus(
+                    self.tokenizer(
                         f" {s[idx[0]:idx[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
@@ -238,13 +238,13 @@ class CWE(object):
                 )
                 if self.leading_whitespace_behavior == "gpt2-mixed":
                     search_queries.append(
-                        self.tokenizer.encode_plus(
+                        self.tokenizer(
                             f" {s[idx[0]:idx[1]]}", add_special_tokens=False
                         )["input_ids"]
                     )
                 elif self.leading_whitespace_behavior == "llama-mixed":
                     search_queries.append(
-                        self.tokenizer.encode_plus(
+                        self.tokenizer(
                             f"{s[idx[0]:idx[1]]}", add_special_tokens=False
                         )["input_ids"]
                     )
@@ -390,7 +390,7 @@ class CWE(object):
         for s, idx1, idx2 in sentences:
             if 0 in idx1:
                 search_queries1.append(
-                    self.tokenizer.encode_plus(
+                    self.tokenizer(
                         f"{s[idx1[0]:idx1[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
@@ -398,14 +398,14 @@ class CWE(object):
                 self.leading_whitespace_behavior == "llama"
             ):  ## Seems like the GPT2 approach really fails w Llama's tokenizer
                 search_queries1.append(
-                    self.tokenizer.encode_plus(
+                    self.tokenizer(
                         f"{s[idx1[0]:idx1[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
             elif self.leading_whitespace_behavior == "gpt2":
                 ## this one really matters if we are using GPT2
                 search_queries1.append(
-                    self.tokenizer.encode_plus(
+                    self.tokenizer(
                         f" {s[idx1[0]:idx1[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
@@ -416,19 +416,19 @@ class CWE(object):
                 )
                 if self.leading_whitespace_behavior == "gpt2-mixed":
                     search_queries1.append(
-                        self.tokenizer.encode_plus(
+                        self.tokenizer(
                             f" {s[idx1[0]:idx1[1]]}", add_special_tokens=False
                         )["input_ids"]
                     )
                 elif self.leading_whitespace_behavior == "llama-mixed":
                     search_queries1.append(
-                        self.tokenizer.encode_plus(
+                        self.tokenizer(
                             f"{s[idx1[0]:idx1[1]]}", add_special_tokens=False
                         )["input_ids"]
                     )
             if 0 in idx2:
                 search_queries2.append(
-                    self.tokenizer.encode_plus(
+                    self.tokenizer(
                         f"{s[idx2[0]:idx2[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
@@ -436,14 +436,14 @@ class CWE(object):
                 self.leading_whitespace_behavior == "llama"
             ):  ## Seems like the GPT2 approach really fails w Llama's tokenizer
                 search_queries2.append(
-                    self.tokenizer.encode_plus(
+                    self.tokenizer(
                         f"{s[idx2[0]:idx2[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
             elif self.leading_whitespace_behavior == "gpt2":
                 ## this one really matters if we are using GPT2
                 search_queries2.append(
-                    self.tokenizer.encode_plus(
+                    self.tokenizer(
                         f" {s[idx2[0]:idx2[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
@@ -454,19 +454,19 @@ class CWE(object):
                 )
                 if self.leading_whitespace_behavior == "gpt2-mixed":
                     search_queries2.append(
-                        self.tokenizer.encode_plus(
+                        self.tokenizer(
                             f" {s[idx2[0]:idx2[1]]}", add_special_tokens=False
                         )["input_ids"]
                     )
                 elif self.leading_whitespace_behavior == "llama-mixed":
                     search_queries2.append(
-                        self.tokenizer.encode_plus(
+                        self.tokenizer(
                             f"{s[idx2[0]:idx2[1]]}", add_special_tokens=False
                         )["input_ids"]
                     )
 
-        # search_queries1 = [self.tokenizer.encode_plus(f'{" ".join(s.split()[idx1[0]:idx1[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
-        # search_queries2 = [self.tokenizer.encode_plus(f'{" ".join(s.split()[idx2[0]:idx2[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
+        # search_queries1 = [self.tokenizer(f'{" ".join(s.split()[idx1[0]:idx1[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
+        # search_queries2 = [self.tokenizer(f'{" ".join(s.split()[idx2[0]:idx2[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
 
         query_idx1 = list(
             map(
@@ -821,7 +821,7 @@ class VisualCWE(CWE):
         for s, idx in sentences:
             if 0 in idx:
                 search_queries.append(
-                    self.processor.tokenizer.encode_plus(
+                    self.processor.tokenizer(
                         f"{s[idx[0]:idx[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
@@ -829,14 +829,14 @@ class VisualCWE(CWE):
                 self.leading_whitespace_behavior == "llama"
             ):  ## Seems like the GPT2 approach really fails w Llama's tokenizer
                 search_queries.append(
-                    self.processor.tokenizer.encode_plus(
+                    self.processor.tokenizer(
                         f"{s[idx[0]:idx[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
             elif self.leading_whitespace_behavior == "gpt2":
                 ## this one really matters if we are using GPT2
                 search_queries.append(
-                    self.processor.tokenizer.encode_plus(
+                    self.processor.tokenizer(
                         f" {s[idx[0]:idx[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
@@ -847,13 +847,13 @@ class VisualCWE(CWE):
                 )
                 if self.leading_whitespace_behavior == "gpt2-mixed":
                     search_queries.append(
-                        self.processor.tokenizer.encode_plus(
+                        self.processor.tokenizer(
                             f" {s[idx[0]:idx[1]]}", add_special_tokens=False
                         )["input_ids"]
                     )
                 elif self.leading_whitespace_behavior == "llama-mixed":
                     search_queries.append(
-                        self.processor.tokenizer.encode_plus(
+                        self.processor.tokenizer(
                             f"{s[idx[0]:idx[1]]}", add_special_tokens=False
                         )["input_ids"]
                     )
@@ -959,7 +959,7 @@ class VisualCWE(CWE):
         for s, idx1, idx2 in sentences:
             if 0 in idx1:
                 search_queries1.append(
-                    self.tokenizer.encode_plus(
+                    self.tokenizer(
                         f"{s[idx1[0]:idx1[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
@@ -967,14 +967,14 @@ class VisualCWE(CWE):
                 self.leading_whitespace_behavior == "llama"
             ):  ## Seems like the GPT2 approach really fails w Llama's tokenizer
                 search_queries1.append(
-                    self.tokenizer.encode_plus(
+                    self.tokenizer(
                         f"{s[idx1[0]:idx1[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
             elif self.leading_whitespace_behavior == "gpt2":
                 ## this one really matters if we are using GPT2
                 search_queries1.append(
-                    self.tokenizer.encode_plus(
+                    self.tokenizer(
                         f" {s[idx1[0]:idx1[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
@@ -985,19 +985,19 @@ class VisualCWE(CWE):
                 )
                 if self.leading_whitespace_behavior == "gpt2-mixed":
                     search_queries1.append(
-                        self.tokenizer.encode_plus(
+                        self.tokenizer(
                             f" {s[idx1[0]:idx1[1]]}", add_special_tokens=False
                         )["input_ids"]
                     )
                 elif self.leading_whitespace_behavior == "llama-mixed":
                     search_queries1.append(
-                        self.tokenizer.encode_plus(
+                        self.tokenizer(
                             f"{s[idx1[0]:idx1[1]]}", add_special_tokens=False
                         )["input_ids"]
                     )
             if 0 in idx2:
                 search_queries2.append(
-                    self.tokenizer.encode_plus(
+                    self.tokenizer(
                         f"{s[idx2[0]:idx2[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
@@ -1005,14 +1005,14 @@ class VisualCWE(CWE):
                 self.leading_whitespace_behavior == "llama"
             ):  ## Seems like the GPT2 approach really fails w Llama's tokenizer
                 search_queries2.append(
-                    self.tokenizer.encode_plus(
+                    self.tokenizer(
                         f"{s[idx2[0]:idx2[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
             elif self.leading_whitespace_behavior == "gpt2":
                 ## this one really matters if we are using GPT2
                 search_queries2.append(
-                    self.tokenizer.encode_plus(
+                    self.tokenizer(
                         f" {s[idx2[0]:idx2[1]]}", add_special_tokens=False
                     )["input_ids"]
                 )
@@ -1023,19 +1023,19 @@ class VisualCWE(CWE):
                 )
                 if self.leading_whitespace_behavior == "gpt2-mixed":
                     search_queries2.append(
-                        self.tokenizer.encode_plus(
+                        self.tokenizer(
                             f" {s[idx2[0]:idx2[1]]}", add_special_tokens=False
                         )["input_ids"]
                     )
                 elif self.leading_whitespace_behavior == "llama-mixed":
                     search_queries2.append(
-                        self.tokenizer.encode_plus(
+                        self.tokenizer(
                             f"{s[idx2[0]:idx2[1]]}", add_special_tokens=False
                         )["input_ids"]
                     )
 
-        # search_queries1 = [self.tokenizer.encode_plus(f'{" ".join(s.split()[idx1[0]:idx1[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
-        # search_queries2 = [self.tokenizer.encode_plus(f'{" ".join(s.split()[idx2[0]:idx2[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
+        # search_queries1 = [self.tokenizer(f'{" ".join(s.split()[idx1[0]:idx1[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
+        # search_queries2 = [self.tokenizer(f'{" ".join(s.split()[idx2[0]:idx2[1]])}', add_special_tokens = False)['input_ids'] for s, idx1, idx2 in sentences]
 
         query_idx1 = list(
             map(
