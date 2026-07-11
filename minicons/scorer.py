@@ -172,6 +172,10 @@ class LMScorer:
     def logprobs(
         self, batch: Iterable, rank: bool = False
     ) -> Union[float, List[float]]:
+        """
+        .. deprecated::
+           Use :meth:`compute_stats` instead.
+        """
         warnings.warn(
             "logprobs is deprecated, use compute_stats instead", DeprecationWarning
         )
@@ -233,17 +237,18 @@ class LMScorer:
         """
         Wraps token_score's outputs into word-level metrics:
             `(word, score)`,
+
         where score represents the log-probability (by default) of the word given context.
         Token probabilities are summed across the whole word. Words are currently split on spaces and punctuation.
 
         Args are the same as token_score except for `agg_method`
+
         :param ``Union[str, List[str]]`` batch: a single sentence or a batch of sentences.
         :param ``bool`` surprisal: If `True`, returns per-word surprisals instead of log-probabilities.
         :param ``bool`` prob: If `True`, returns per-word probabilities instead of log-probabilities.
         :param ``bool`` base_two: If `True`, uses log base 2 instead of natural-log (returns bits of values in case of surprisals)
         :param ``bool`` rank: If `True`, also returns the rank of each word in context (based on the log-probability value)
 
-        Outputs are in the same format as token_score outputs
         :return: A `List` containing a `Tuple` consisting of the word, its associated score, and optionally, its rank.
         :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
         """
@@ -294,7 +299,8 @@ class LMScorer:
         self, batch: Union[str, List[str]], pool: Callable = torch.mean, *args
     ) -> Union[float, List[float]]:
         """
-        DEPRECATED as of v 0.1.18. Check out ``sequence_score`` or ``token_score`` instead!
+        .. deprecated:: 0.1.18
+           Use :meth:`sequence_score` or :meth:`token_score` instead.
 
         Pooled estimates of sentence log probabilities, computed by the
         language model. Pooling is usually done using a function that
@@ -324,7 +330,8 @@ class LMScorer:
         *args,
     ) -> None:
         """
-        DEPRECATED as of v 0.2.10. Check out ``partial_score`` instead!
+        .. deprecated:: 0.2.10
+           Use :meth:`conditional_score` or :meth:`token_score` instead.
         """
         warnings.warn(
             "adapt_score is deprecated, use conditional_score or token_score instead",
@@ -339,6 +346,10 @@ class LMScorer:
         reduction: Callable = lambda x: x.mean(0).item(),
         **kwargs,
     ) -> List[float]:
+        """
+        .. deprecated::
+           Use :meth:`conditional_score` instead.
+        """
         warnings.warn(
             "partial_score is deprecated, use conditional_score instead",
             DeprecationWarning,
@@ -438,7 +449,7 @@ class LMScorer:
             will be manually encoded.
         :type manual_special: bool
         :param return_tensors: returned tensor format. Default `'pt'`
-        :type manual_special: str
+        :type return_tensors: str
 
         :return: Encoded batch
         :rtype: ``BatchEncoding``
@@ -449,7 +460,7 @@ class LMScorer:
             # manually add special tokens
             sentences = self.add_special_tokens(sentences)
             if return_tensors:
-                tokens = self.tokenizer.batch_encode_plus(
+                tokens = self.tokenizer(
                     sentences,
                     add_special_tokens=False,
                     padding="longest",
@@ -458,7 +469,7 @@ class LMScorer:
                 )
         else:
             # mostly for masked LMs
-            tokens = self.tokenizer.batch_encode_plus(
+            tokens = self.tokenizer(
                 sentences, padding="longest", return_attention_mask=True
             )
 
@@ -578,7 +589,7 @@ class MaskedLMScorer(LMScorer):
             is an input sentence, and word is a word present in the
             sentence that will be masked out.
 
-        :return: Tuple `(sentence, word, length)`
+        :return: Tuple `(sentences, words)`
         """
         sentence_words = (
             [sentence_words] if isinstance(sentence_words, tuple) else sentence_words
@@ -813,7 +824,7 @@ class MaskedLMScorer(LMScorer):
             For motivation as to why to use `within_word_l2r` PLL scoring, see Kauf & Ivanova (2023):
             https://arxiv.org/abs/2305.10588
 
-        :return: Batch of formatted input that can be passed to `logprob`
+        :return: Batch of formatted input that can be passed to `compute_stats`
         """
         # converts input text to batch of tensors with every position except the cls and sep token masked
 
@@ -841,8 +852,8 @@ class MaskedLMScorer(LMScorer):
         modifies code from the following github repository by simonpri:
         https://github.com/simonepri/lm-scorer
 
-        :param ``Union[str, List[str]]`` preamble: Batch of prefixes/prime/preambles on which the LM is conditioned.
-        :param ``Union[str, List[str]]`` stimuli: Batch of continuations that are scored based on the conditioned text (provided in the ``preamble``). The positions of the elements match their counterparts in the ``preamble``.
+        :param ``Union[str, List[str]]`` prefix: Batch of prefixes/prime/preambles on which the LM is conditioned.
+        :param ``Union[str, List[str]]`` stimuli: Batch of continuations that are scored based on the conditioned text (provided in the ``prefix``). The positions of the elements match their counterparts in the ``prefix``.
 
         :return: Batch of formatted input that can be passed to
             ``compute_stats``
@@ -1038,7 +1049,8 @@ class MaskedLMScorer(LMScorer):
         self, batch: Iterable, rank=False
     ) -> Union[List[Tuple[torch.Tensor, str]], List[Tuple[torch.Tensor, str, int]]]:
         """
-        Returns log probabilities
+        .. deprecated::
+           Use :meth:`compute_stats` instead.
 
         :param `Iterable` batch: A batch of inputs fit to pass to a
             transformer LM.
@@ -1337,6 +1349,10 @@ class MaskedLMScorer(LMScorer):
         reduction: Callable = lambda x: x.mean(0).item(),
         **kwargs,
     ) -> List[float]:
+        """
+        .. deprecated::
+           Use :meth:`conditional_score` instead.
+        """
         warnings.warn(
             "partial_score is deprecated, use conditional_score instead",
             DeprecationWarning,
@@ -1478,12 +1494,12 @@ class IncrementalLMScorer(LMScorer):
         :type text: Union[str, List[str]]
         :param bos_token: Whether the bos_token should be added in the beginning.
         :type bos_token: bool
-        :param bos_token: Whether the eos_token should be added at the end.
-        :type bos_token: bool
+        :param eos_token: Whether the eos_token should be added at the end.
+        :type eos_token: bool
 
         :return: Modified input, containing special tokens as per
             tokenizer specification
-        :rtype: Union[float, List[float]]:
+        :rtype: Union[str, List[str]]:
         """
 
         def _format(self, text, bos, eos):
@@ -1759,7 +1775,7 @@ class IncrementalLMScorer(LMScorer):
         :param ``bool`` prob: whether the model should return probabilities instead of log-probabilities. Can only be `True` when `base_two` is `False`.
         :param ``bool`` base_two: whether the base of the log should be 2 (usually preferred when reporting results in bits). Can only be `True` when `prob` is `False`.
         :param ``bool`` return_tensors: whether the model should return scores as a list of tensors instead of a list of lists. This is important in some other convenient methods used in the package.
-        :param ``bool'' bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
+        :param bool bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
 
         :return: Either a tuple of lists, each containing probabilities and ranks per token in each sentence passed in the input.
         :rtype: ``Union[Tuple[List[float], List[int]], List[float]]``
@@ -1958,7 +1974,7 @@ class IncrementalLMScorer(LMScorer):
         :param ``bool`` prob: If `True`, returns per-word probabilities instead of log-probabilities.
         :param ``bool`` base_two: If `True`, uses log base 2 instead of natural-log (returns bits of values in case of surprisals)
         :param ``bool`` rank: If `True`, also returns the rank of each word in context (based on the log-probability value)
-        :param ``bool'' bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
+        :param bool bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
 
         :return: A `List` containing a `Tuple` consisting of the word, its associated score, and optionally, its rank.
         :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
@@ -2180,7 +2196,8 @@ class IncrementalLMScorer(LMScorer):
 
     def logprobs(self, batch: Iterable, rank=False) -> Union[float, List[float]]:
         """
-        Returns log probabilities
+        .. deprecated::
+           Use :meth:`compute_stats` instead.
 
         :param `Iterable` batch: A batch of inputs fit to pass to a
             transformer LM.
@@ -2397,7 +2414,7 @@ class Seq2SeqScorer(LMScorer):
 
         :return: Modified input, containing special tokens as per
             tokenizer specification
-        :rtype: Union[float, List[float]]:
+        :rtype: Union[str, List[str]]:
         """
         sentences = [text] if isinstance(text, str) else text
         sentences = [self.tokenizer.bos_token + sentence for sentence in sentences]
@@ -2979,7 +2996,8 @@ class Seq2SeqScorer(LMScorer):
         self, batch: Iterable, rank=False, source_format: str = "blank"
     ) -> Union[float, List[float]]:
         """
-        Returns log probabilities
+        .. deprecated::
+           Use :meth:`compute_stats` instead.
 
         :param `Iterable` batch: A batch of inputs fit to pass to a
             transformer LM.
@@ -3367,7 +3385,7 @@ class MambaScorer(LMScorer):
         :param ``bool`` prob: whether the model should return probabilities instead of log-probabilities. Can only be `True` when `base_two` is `False`.
         :param ``bool`` base_two: whether the base of the log should be 2 (usually preferred when reporting results in bits). Can only be `True` when `prob` is `False`.
         :param ``bool`` return_tensors: whether the model should return scores as a list of tensors instead of a list of lists. This is important in some other convenient methods used in the package.
-        :param ``bool'' bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
+        :param bool bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
 
         :return: Either a tuple of lists, each containing probabilities and ranks per token in each sentence passed in the input.
         :rtype: ``Union[Tuple[List[float], List[int]], List[float]]``
@@ -3705,7 +3723,7 @@ class MambaScorer(LMScorer):
         :param ``bool`` prob: If `True`, returns per-word probabilities instead of log-probabilities.
         :param ``bool`` base_two: If `True`, uses log base 2 instead of natural-log (returns bits of values in case of surprisals)
         :param ``bool`` rank: If `True`, also returns the rank of each word in context (based on the log-probability value)
-        :param ``bool'' bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
+        :param bool bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
 
         :return: A `List` containing a `Tuple` consisting of the word, its associated score, and optionally, its rank.
         :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
@@ -4085,7 +4103,7 @@ class VLMScorer(LMScorer):
         :param ``bool`` prob: whether the model should return probabilities instead of log-probabilities. Can only be `True` when `base_two` is `False`.
         :param ``bool`` base_two: whether the base of the log should be 2 (usually preferred when reporting results in bits). Can only be `True` when `prob` is `False`.
         :param ``bool`` return_tensors: whether the model should return scores as a list of tensors instead of a list of lists. This is important in some other convenient methods used in the package.
-        :param ``bool'' bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
+        :param bool bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
 
         :return: Either a tuple of lists, each containing probabilities and ranks per token in each sentence passed in the input.
         :rtype: ``Union[Tuple[List[float], List[int]], List[float]]``
@@ -4285,7 +4303,7 @@ class VLMScorer(LMScorer):
         :param ``bool`` prob: If `True`, returns per-word probabilities instead of log-probabilities.
         :param ``bool`` base_two: If `True`, uses log base 2 instead of natural-log (returns bits of values in case of surprisals)
         :param ``bool`` rank: If `True`, also returns the rank of each word in context (based on the log-probability value)
-        :param ``bool'' bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
+        :param bool bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
 
         :return: A `List` containing a `Tuple` consisting of the word, its associated score, and optionally, its rank.
         :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
@@ -4397,7 +4415,7 @@ class VLMScorer(LMScorer):
         :param reduction: Reduction function, is selected to be
             ``lambda x: x.mean(0).item()`` by default, which stands for the avg. log-probability per token for each sequence in the batch.
         :type reduction: Callable
-        :param ``bool'' bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
+        :param bool bow_correction: whether to apply the beginning of word correction, as pointed out in Pimentel and Meister (2024) and Oh and Schuler (2024).
         :param kw: model-specific keyword arguments to pass to the `prepare_text` function
         :return: List of floats specifying the desired score for the stimuli part of the input, e.g., P(stimuli | preamble).
         :rtype: ``List[float]``

@@ -12,7 +12,13 @@ BUILDDIR      = _build
 help:
 	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
-.PHONY: help Makefile
+WEBSITE_DIR  ?= $(HOME)/website/static/minicons
+
+.PHONY: help publish Makefile
+
+publish: html
+	rsync -a --delete $(BUILDDIR)/html/ $(WEBSITE_DIR)/
+	cd $(HOME)/website && git add static/minicons && git commit -m "update minicons docs" && git push
 
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).

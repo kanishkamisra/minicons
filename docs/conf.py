@@ -24,7 +24,7 @@ copyright = '2023, Kanishka Misra'
 author = 'Kanishka Misra'
 
 # The full version, including alpha/beta/rc tags
-release = '0.2.14'
+release = '0.3.39'
 
 
 # -- General configuration ---------------------------------------------------
@@ -36,6 +36,20 @@ extensions = [
     'sphinx.ext.autodoc',
     'myst_parser',
     'sphinx.ext.autosectionlabel'
+]
+
+autosectionlabel_prefix_document = True
+suppress_warnings = ["myst.xref_missing"]
+
+autodoc_mock_imports = [
+    "torch",
+    "transformers",
+    "PIL",
+    "accelerate",
+    "numpy",
+    "pandas",
+    "mamba_ssm",
+    "wonderwords",
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -58,6 +72,9 @@ html_theme = 'furo'
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
+html_js_files = ['custom.js']
+html_css_files = ['custom.css']
+html_extra_path = ['_extra']
 html_theme_options = {
     "light_logo": "logo.png",
     "dark_logo": "logo.png",

@@ -1,29 +1,8 @@
-minicons package
-================
-
-Subpackages
------------
+minicons
+========
 
 .. toctree::
-   :maxdepth: 4
+   :maxdepth: 3
 
-   minicons.bin
-
-Submodules
-----------
-
-.. toctree::
-   :maxdepth: 4
-
-   minicons.cwe
    minicons.scorer
-   minicons.supervised
-   minicons.utils
-
-Module contents
----------------
-
-.. automodule:: minicons
-   :members:
-   :undoc-members:
-   :show-inheritance:
+   minicons.cwe

@@ -1,7 +1,11 @@
-minicons.cwe module
-===================
+CWE (Contextual Word Embeddings)
+================================
 
-.. automodule:: minicons.cwe
-   :members:
-   :undoc-members:
-   :show-inheritance:
+Classes for extracting contextual word embeddings from transformer models.
+
+.. toctree::
+   :maxdepth: 1
+
+   cwe/CWE
+   cwe/EncDecCWE
+   cwe/VisualCWE
