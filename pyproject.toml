@@ -14,10 +14,10 @@ minicons = 'minicons.bin.score_cli:process'
 
 [tool.poetry.dependencies]
 python = ">=3.10.0,<4"
-transformers = ">=4.6"
+transformers = ">=5.5"
 accelerate= ">=0.25.0"
 torch = ">=2.5.0"
-pandas = ">=2.2.0"
+pandas = ">=2.2.0,<3"
 pillow = ">=10.2.0"
 wonderwords = ">=2.2.0"
 numpy = ">=2.0.0"
