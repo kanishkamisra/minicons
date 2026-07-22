@@ -184,8 +184,9 @@ lm.sequence_score(
 ## Tutorials
 
 - [Introduction to using LM-scoring methods using minicons](https://kanishka.website/post/minicons-running-large-scale-behavioral-analyses-on-transformer-lms/)
-- [Computing sentence and token surprisals using minicons](examples/surprisals.md)
-- [Extracting word/phrase representations using minicons](examples/word_representations.md)
+- [Computing sentence and token surprisals using minicons](https://kanishka.website/minicons/tutorials_lm_scoring.html)
+<!-- - [Old surprisals tutorial](https://kanishka.website/minicons/tutorials_surprisals.html) -->
+- [Extracting word/phrase representations using minicons](https://kanishka.website/minicons/tutorials_word_representations.html)
 
 ## Recent Updates
 - **November 6, 2021:** MLM scoring has been fixed! You can now use `model.token_score()` and `model.sequence_score()` with `MaskedLMScorers` as well!

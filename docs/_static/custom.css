@@ -1,0 +1,12 @@
+@import url('https://fonts.googleapis.com/css2?family=Karla:ital,wght@0,200..800;1,200..800&display=swap');
+
+body,
+.sidebar-tree,
+.toc-tree {
+    font-family: 'Karla', sans-serif;
+}
+
+/* Hide notebook section anchors from the left sidebar on other pages */
+.sidebar-tree li:has(> a[href*="tutorials_lm_scoring.html#"]) {
+    display: none;
+}

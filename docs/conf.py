@@ -34,11 +34,14 @@ release = '0.3.39'
 # ones.
 extensions = [
     'sphinx.ext.autodoc',
-    'myst_parser',
-    'sphinx.ext.autosectionlabel'
+    'myst_nb',
+    'sphinx.ext.autosectionlabel',
+    'sphinx.ext.mathjax',
 ]
 
 autosectionlabel_prefix_document = True
+nb_execution_mode = "off"
+myst_enable_extensions = ["dollarmath"]
 suppress_warnings = ["myst.xref_missing"]
 
 autodoc_mock_imports = [
@@ -58,7 +61,7 @@ templates_path = ['_templates']
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store', 'tutorials_surprisals.md']
 autodoc_member_order='bysource'
 
 # -- Options for HTML output -------------------------------------------------
