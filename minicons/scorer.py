@@ -12,14 +12,13 @@ from typing import (
     cast,
 )
 
+import inspect
 import re
 import torch
 import warnings
 
 from collections import defaultdict
-from itertools import chain
 
-import numpy as np
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForMaskedLM,
@@ -252,13 +251,18 @@ class LMScorer:
         :return: A `List` containing a `Tuple` consisting of the word, its associated score, and optionally, its rank.
         :rtype: ``Union[List[Tuple[str, float]], List[Tuple[str, float, int]]]``
         """
+        # only scorers that support these (e.g., autoregressive ones) accept them
+        extra = {"bow_correction": True} if bow_correction else {}
+        # words are matched against decoded tokens (e.g., "is", not "Ġis")
+        if "decode" in inspect.signature(self.token_score).parameters:
+            extra["decode"] = True
         all_token_scores = self.token_score(
             batch=batch,
             surprisal=surprisal,
             prob=prob,
             base_two=base_two,
             rank=rank,
-            bow_correction=bow_correction,
+            **extra,
         )
         all_word_scores = []
         for i in range(len(all_token_scores)):
@@ -269,7 +273,11 @@ class LMScorer:
             words = re.findall(r"[\w']+|[.,!?;]", sentence)
             token_scores = all_token_scores[i]
             # if token_score pads the beginning with a token (i.e. like llama)
-            if token_scores[0][0] == self.tokenizer.special_tokens_map["bos_token"]:
+            if (
+                len(token_scores) > 0
+                and token_scores[0][0]
+                == self.tokenizer.special_tokens_map.get("bos_token")
+            ):
                 token_scores = token_scores[1:]
             token_index = 0
             word_index = 0
@@ -279,12 +287,14 @@ class LMScorer:
                     current_word = words[word_index]
                     current_token, current_surprisal = token_scores[token_index]
                     # token does not match, alignment must be adjusted
-                    mismatch = current_token != current_word
+                    # (case-insensitive, for uncased tokenizers; and ignoring
+                    # the "##" marking word continuations in WordPiece)
+                    mismatch = current_token.casefold() != current_word.casefold()
                     while mismatch:
                         token_index += 1
-                        current_token += token_scores[token_index][0]
+                        current_token += token_scores[token_index][0].removeprefix("##")
                         current_surprisal += token_scores[token_index][1]
-                        mismatch = current_token != current_word
+                        mismatch = current_token.casefold() != current_word.casefold()
                     word_scores.append((current_word, current_surprisal))
                     token_index += 1
                     word_index += 1
@@ -459,14 +469,13 @@ class LMScorer:
         if manual_special:
             # manually add special tokens
             sentences = self.add_special_tokens(sentences)
-            if return_tensors:
-                tokens = self.tokenizer(
-                    sentences,
-                    add_special_tokens=False,
-                    padding="longest",
-                    return_attention_mask=True,
-                    return_tensors=return_tensors,
-                )
+            tokens = self.tokenizer(
+                sentences,
+                add_special_tokens=False,
+                padding="longest",
+                return_attention_mask=True,
+                return_tensors=return_tensors,
+            )
         else:
             # mostly for masked LMs
             tokens = self.tokenizer(
@@ -609,6 +618,81 @@ class MaskedLMScorer(LMScorer):
 
         return (sentences, words)
 
+    @staticmethod
+    def _find_word_span(sentence: str, word: str) -> Optional[Tuple[int, int]]:
+        """
+        Finds the character span ``[start, end)`` of the first occurrence of
+        ``word`` in ``sentence``.
+        """
+        # Prefer an exact whole-word match, then a case-insensitive one (e.g.,
+        # for uncased tokenizers), then any occurrence (word may only appear as
+        # part of a longer word).
+        patterns = [
+            (rf"(?<!\w){re.escape(word)}(?!\w)", 0),
+            (rf"(?<!\w){re.escape(word)}(?!\w)", re.IGNORECASE),
+            (re.escape(word), re.IGNORECASE),
+        ]
+        for pattern, flags in patterns:
+            match = re.search(pattern, sentence, flags)
+            if match is not None:
+                return match.span()
+
+        return None
+
+    @staticmethod
+    def _word_token_span(
+        sentence: str,
+        word: str,
+        offsets: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> Optional[Tuple[int, int]]:
+        """
+        Maps the first occurrence of ``word`` in ``sentence`` to a span of
+        token indices ``[start, end)`` using the tokenizer's character offsets.
+        Independent of how the tokenizer handles whitespace (WordPiece, BPE,
+        SentencePiece, etc.).
+        """
+        char_span = MaskedLMScorer._find_word_span(sentence, word)
+
+        if char_span is None:
+            return None
+
+        char_start, char_end = char_span
+
+        token_indices = [
+            i
+            for i, (tok_start, tok_end) in enumerate(offsets.tolist())
+            # special and padding tokens have empty (0, 0) offsets
+            if attention_mask[i] == 1
+            and tok_end > tok_start
+            and tok_start < char_end
+            and tok_end > char_start
+        ]
+
+        if not token_indices:
+            return None
+
+        return token_indices[0], token_indices[-1] + 1
+
+    def _word_token_span_from_ids(
+        self, token_ids: torch.Tensor, word: str
+    ) -> Optional[Tuple[int, int]]:
+        """
+        Fallback for tokenizers without offsets: finds the first occurrence of
+        the word's token ids, trying both the bare word and a leading-space
+        variant (for tokenizers that encode word-initial spaces).
+        """
+        for candidate in (word, " " + word):
+            desired = self.tokenizer(
+                candidate, return_tensors="pt", add_special_tokens=False
+            )["input_ids"][0]
+            n = len(desired)
+            for start_idx in range(len(token_ids) - n + 1):
+                if torch.equal(token_ids[start_idx : start_idx + n], desired):
+                    return start_idx, start_idx + n
+
+        return None
+
     def cloze(
         self,
         sentence_words: Union[Tuple[str, str], List[Tuple[str, str]]],
@@ -616,66 +700,70 @@ class MaskedLMScorer(LMScorer):
         probs: Optional[bool] = False,
     ) -> List[float]:
         """
-        Runs inference on masked input.
+        Computes the (pseudo) log-probability of a word given the rest of its
+        sentence, e.g., ``cloze(("The cat sat on the mat.", "mat"))`` scores
+        ``mat`` in context. If the word is split into multiple tokens, the
+        scores of its tokens are summed.
         Note: only works for masked LMs.
 
+        The word is located in the sentence by its characters (first
+        whole-word occurrence, falling back to a case-insensitive match), and
+        then mapped to tokens using the tokenizer's offsets. This works with
+        WordPiece, BPE (e.g., RoBERTa, ModernBERT) and SentencePiece
+        tokenizers alike. Only the first occurrence of the word is scored.
+
         :param ``Union[Tuple[str], List[Tuple[str]]]`` sentence_words:
-            Input consisting of `[(sentence, word)]`, where sentence
-            is an input sentence, and word is a word present in the
-            sentence that will be masked out and inferred.
+            Input consisting of `[(sentence, word)]` (or a single
+            `(sentence, word)` tuple), where sentence is an input sentence,
+            and word is a word present in the sentence that will be masked out
+            and inferred.
         :param PLL_metric: PLL scoring strategy to be used.
             Options: `original` or `within_word_l2r`. Default: `original`
             For motivation as to why to use `within_word_l2r` PLL scoring, see Kauf & Ivanova (2023):
             https://arxiv.org/abs/2305.10588
         :param probs: whether to return probabilities (if True) or log probabilities (if False)
 
-        :return: A list of tensors corresponding to (log) probabilities for the desired word
-            in context
+        :return: A list of floats, one per input, corresponding to the (log)
+            probability of the desired word in context.
+        :raises ValueError: if a word is not found in its sentence.
         """
-        sentences = list(map(lambda x: x[0], sentence_words))
-        encoded = self.tokenizer(sentences, return_tensors="pt", padding=True)
+        if isinstance(sentence_words, tuple):
+            sentence_words = [sentence_words]
+
+        sentences = [sentence for sentence, _ in sentence_words]
+        use_offsets = bool(getattr(self.tokenizer, "is_fast", False))
+        encoded = self.tokenizer(
+            sentences,
+            return_tensors="pt",
+            padding=True,
+            return_offsets_mapping=use_offsets,
+        )
+        offset_mapping = encoded.pop("offset_mapping") if use_offsets else None
+
         targets_start = []
         targets_end = []
 
-        # Iterating over sentence-target word pairs
+        # Locating the target word's tokens in each sentence
         for batch_index, (sentence, word) in enumerate(sentence_words):
-            desired_tokens = self.tokenizer(
-                word, return_tensors="pt", add_special_tokens=False
-            )["input_ids"][0]
-            if PLL_metric == "within_word_l2r":
-                start_idx = None
-                word_ids = encoded.word_ids(batch_index=batch_index)
-                # Iterating over all words in the sentence
-                for word_id in set(word_ids):
-                    # Ignoring special tokens
-                    if word_id is None:
-                        continue
-                    # Finding all tokens corresponding to the chosen word
-                    indices = np.where(list(map(lambda x: x == word_id, word_ids)))[0]
-                    tokens = encoded["input_ids"][batch_index][indices]
-                    # Checking if the chosen word matches the target word
-                    if torch.equal(tokens, desired_tokens):
-                        start_idx = indices[0]
-                if start_idx:
-                    targets_start.append(start_idx)
-                    targets_end.append(start_idx + len(desired_tokens))
-                else:
-                    raise ValueError(
-                        f"Word ``{word}'' not found in sentence ``{sentence}''. PLL=within_word_l2r won't work if ``{word}'' is a subword or multiple words."
-                    )
+            if use_offsets:
+                span = self._word_token_span(
+                    sentence,
+                    word,
+                    offset_mapping[batch_index],
+                    encoded["attention_mask"][batch_index],
+                )
             else:
-                for start_idx in range(
-                    len(encoded["input_ids"][batch_index]) - len(desired_tokens)
-                ):
-                    # Checking if the chosen sequence of tokens matches the target sequence of tokens
-                    if torch.equal(
-                        encoded["input_ids"][batch_index][
-                            start_idx : len(desired_tokens) + start_idx
-                        ],
-                        desired_tokens,
-                    ):
-                        targets_start.append(start_idx)
-                        targets_end.append(start_idx + len(desired_tokens))
+                span = self._word_token_span_from_ids(
+                    encoded["input_ids"][batch_index], word
+                )
+
+            if span is None:
+                raise ValueError(
+                    f"Word ``{word}'' not found in sentence ``{sentence}''."
+                )
+
+            targets_start.append(span[0])
+            targets_end.append(span[1])
 
         if self.device != "auto":
             encoded = encoded.to(self.device)
@@ -800,9 +888,9 @@ class MaskedLMScorer(LMScorer):
                 # the attention mask is identical for all masked sets
                 attention_mask.expand(len(target_token_indices), -1),
                 # ids of the tokens to be predicted
-                torch.tensor(target_token_ids),
+                torch.tensor(target_token_ids, dtype=torch.long),
                 # indices of the tokens to be predicted
-                torch.tensor(target_token_indices),
+                torch.tensor(target_token_indices, dtype=torch.long),
             )
 
     def prepare_text(
@@ -928,25 +1016,20 @@ class MaskedLMScorer(LMScorer):
 
         :return: Tensor consisting of log probabilies over vocab items.
         """
-        # takes in prepared text and returns scores for each sentence in batch
-        token_ids, attention_masks, effective_token_ids, lengths, offsets = list(
-            zip(*batch)
-        )
+        # takes in prepared text and returns, for every masked target token,
+        # the model's distribution at that position
+        token_ids, attention_masks, _, target_token_indices = zip(*batch)
         token_ids = torch.cat(token_ids)
         attention_masks = torch.cat(attention_masks)
         if self.device != "auto":
             token_ids = token_ids.to(self.device)
             attention_masks = attention_masks.to(self.device)
-        effective_token_ids = torch.cat([torch.tensor(x) for x in effective_token_ids])
 
-        indices = list(
-            chain.from_iterable(
-                [list(range(o, o + n)) for n, o in zip(lengths, offsets)]
-            )
-        )
         with torch.no_grad():
             output = self.model(token_ids, attention_mask=attention_masks)
-            logits = output.logits[torch.arange(sum(lengths)), indices].detach()
+            logits = output.logits[
+                torch.arange(token_ids.shape[0]), torch.cat(target_token_indices)
+            ].detach()
 
         logprob_distribution = logits - logits.logsumexp(1).unsqueeze(1)
 
@@ -960,9 +1043,16 @@ class MaskedLMScorer(LMScorer):
         abstract token (bw_i) representing a blank word and returns a distribution
         over the vocabulary of the model.
 
+        The first occurrence of ``bw_i`` in ``s_i`` is replaced with the
+        model's mask token, so ``bw_i`` can be an abstract placeholder (e.g.,
+        ``"BLANK"``, ``"[MASK]"``) or an actual word in the prompt. Any later
+        occurrences are left as is.
+
         :param `Iterable` queries: A batch of [(s_i, bw_i)] where s_i is a prompt with an abstract token (bw_i) representing a blank word
 
-        :return: Tensor contisting of log probabilities over vocab items.
+        :return: Tensor consisting of log probabilities over vocab items, with
+            one row per query.
+        :raises ValueError: if ``bw_i`` is not found in ``s_i``.
         """
 
         if len(queries) == 0:
@@ -971,41 +1061,29 @@ class MaskedLMScorer(LMScorer):
         if isinstance(next(iter(queries)), str):
             queries = [cast(Tuple[str, str], queries)]
 
-        prompts, words = zip(*queries)
+        # Replace the first occurrence of each blank word with the mask token
+        masked = []
+        for prompt, word in queries:
+            char_span = self._find_word_span(prompt, word)
 
-        # modified_prompts = self.add_special_tokens(prompts)
-        modified_prompts = self.tokenizer.batch_decode(
-            self.tokenizer(prompts)["input_ids"]
-        )
-        # splits = [prompt.split(word) for prompt, word in zip(modified_prompts, words)]
-        splits = [
-            re.split(rf"{re.escape(word)}", prompt)
-            for prompt, word in zip(modified_prompts, words)
-        ]
-        splits = [[x.strip() for x in s] for s in splits]
-        pre, post = list(zip(*splits))
-        pre_idx = self.tokenizer(list(pre), add_special_tokens=False, padding=False)[
-            "input_ids"
-        ]
-        mask_idx = [len(item) for item in pre_idx]
-        # masked = [
-        #     m.replace(w, self.tokenizer.mask_token)
-        #     for m, w in zip(modified_prompts, words)
-        # ]
-        masked = [
-            re.sub(rf"\b{w}\b", self.tokenizer.mask_token, m)
-            for m, w in zip(prompts, words)
-        ]
+            if char_span is None:
+                raise ValueError(f"Word ``{word}'' not found in prompt ``{prompt}''.")
+
+            char_start, char_end = char_span
+            masked.append(
+                prompt[:char_start] + self.tokenizer.mask_token + prompt[char_end:]
+            )
 
         with torch.no_grad():
-            # encoded = self.tokenizer(
-            #     masked, add_special_tokens=False, return_tensors="pt", padding=True
-            # )
             encoded = self.tokenizer(masked, return_tensors="pt", padding=True)
+
+            # The position of the mask token in each (padded) sequence
+            mask_idx = (encoded["input_ids"] == self.mask_token_id).int().argmax(dim=1)
+
             if self.device != "auto":
                 encoded = encoded.to(self.device)
             logits = self.model(**encoded)
-            presoftmax = logits.logits[torch.arange(len(queries)), mask_idx]
+            presoftmax = logits.logits[torch.arange(len(masked)), mask_idx]
             if "cuda" in self.device or "auto" in self.device:
                 presoftmax = presoftmax.detach().cpu()
             else:
@@ -1021,6 +1099,21 @@ class MaskedLMScorer(LMScorer):
         space: List[List[str]] = None,
         base_two: bool = False,
     ):
+        """
+        Computes the entropy of the model's distribution for a blank word (see
+        :meth:`cloze_distribution`), i.e., how uncertain the model is about the
+        blank given its prompt.
+
+        :param sentence_words: A batch of [(s_i, bw_i)] where s_i is a prompt
+            with an abstract token (bw_i) representing a blank word.
+        :param space: Optionally, a list of candidate words for each query. If
+            provided, the distribution is restricted to these candidates and
+            renormalized before computing entropy. Lists can differ in length.
+        :param base_two: whether to return entropy in bits (log base 2) instead
+            of nats.
+
+        :return: Tensor of entropies, one per query.
+        """
         logprobs = self.cloze_distribution(sentence_words)
 
         if space is not None:
@@ -1038,10 +1131,14 @@ class MaskedLMScorer(LMScorer):
             probs = probs / (probs.sum(1).unsqueeze(1))
             logprobs = probs.log()
 
+        # 0 * log(0) is taken to be 0 (padded candidates have zero probability)
+        probs = logprobs.exp()
+        plogp = torch.where(probs > 0, probs * logprobs, torch.zeros_like(probs))
+
         if base_two:
-            H = -(logprobs.exp() * logprobs / torch.tensor(2).log()).sum(1)
+            H = -(plogp / torch.tensor(2).log()).sum(1)
         else:
-            H = -(logprobs.exp() * logprobs).sum(1)
+            H = -plogp.sum(1)
 
         return H
 
@@ -1063,53 +1160,19 @@ class MaskedLMScorer(LMScorer):
         warnings.warn(
             "logprobs is deprecated, use compute_stats instead", DeprecationWarning
         )
-        token_ids, attention_masks, effective_token_ids, lengths, offsets = list(
-            zip(*batch)
-        )
-        token_ids = torch.cat(token_ids)
-        attention_masks = torch.cat(attention_masks)
-        if self.device != "auto":
-            token_ids = token_ids.to(self.device)
-            attention_masks = attention_masks.to(self.device)
-        effective_token_ids = torch.cat([torch.tensor(x) for x in effective_token_ids])
+        batch = list(batch)
+        sent_tokens = [
+            self.tokenizer.convert_ids_to_tokens(target_ids.tolist())
+            for _, _, target_ids, _ in batch
+        ]
 
-        sent_tokens = list(
-            map(
-                lambda x: self.tokenizer.convert_ids_to_tokens(x.tolist()),
-                effective_token_ids.split(lengths),
+        if rank:
+            sent_log_probs, word_ranks = self.compute_stats(
+                batch, rank=True, return_tensors=True
             )
-        )
+            return list(zip(sent_log_probs, sent_tokens, word_ranks))
 
-        indices = list(
-            chain.from_iterable(
-                [list(range(o, o + n)) for n, o in zip(lengths, offsets)]
-            )
-        )
-        with torch.no_grad():
-            output = self.model(token_ids, attention_mask=attention_masks)
-            logits = output.logits[torch.arange(sum(lengths)), indices]
-            if "cuda" in self.device:
-                logits.detach().cpu()
-
-            sent_log_probs = logits - logits.logsumexp(1).unsqueeze(1)
-            if rank:
-                shape = sent_log_probs.shape
-                # inv_ranks = (sent_log_probs).argsort().argsort() + 1
-                # ranks = shape[1] - inv_ranks + 1
-                ranks = (-1.0 * sent_log_probs).argsort().argsort() + 1
-                word_ranks = ranks[torch.arange(shape[0]), effective_token_ids].split(
-                    lengths
-                )
-            sent_log_probs = (
-                sent_log_probs[torch.arange(sum(lengths)), effective_token_ids]
-                .type(torch.Tensor)
-                .split(lengths)
-            )
-            # print(sent_log_probs)
-            # sentence_scores = list(map(lambda x: x.sum().tolist(), logprobs))
-            # outputs.append((logprobs, sent_tokens))
-            if rank:
-                return list(zip(sent_log_probs, sent_tokens, word_ranks))
+        sent_log_probs = self.compute_stats(batch, return_tensors=True)
 
         return list(zip(sent_log_probs, sent_tokens))
 
