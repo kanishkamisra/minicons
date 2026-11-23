@@ -1505,9 +1505,25 @@ class IncrementalLMScorer(LMScorer):
             self.model.eval()
 
         self.padding_side = self.tokenizer.padding_side
-
-        self.padding_side = self.tokenizer.padding_side
         self.pad_token_id = self.tokenizer.pad_token_id
+
+        # Whether the tokenizer adds BOS/EOS tokens on its own (e.g., Llama,
+        # OPT), in which case we must not add a second one ourselves.
+        try:
+            with_special = self.tokenizer("a")["input_ids"]
+            without_special = self.tokenizer("a", add_special_tokens=False)["input_ids"]
+            adds_something = len(with_special) > len(without_special)
+            bos_id = self.tokenizer.bos_token_id
+            eos_id = self.tokenizer.eos_token_id
+            self._adds_bos = (
+                adds_something and bos_id is not None and with_special[0] == bos_id
+            )
+            self._adds_eos = (
+                adds_something and eos_id is not None and with_special[-1] == eos_id
+            )
+        except Exception:
+            self._adds_bos = False
+            self._adds_eos = False
 
         # bow_subtokens, but only if the model has a
         try:
@@ -1530,7 +1546,7 @@ class IncrementalLMScorer(LMScorer):
         if self.is_bow_tokenizer:
             self.bow_subwords = defaultdict(lambda: False)
             for word, idx in self.tokenizer.get_vocab().items():
-                if word[0] == self.bow_symbol:
+                if word[:1] == self.bow_symbol:
                     self.bow_subwords[idx] = True
                 else:
                     self.bow_subwords[idx] = False
@@ -1565,17 +1581,46 @@ class IncrementalLMScorer(LMScorer):
         :rtype: Union[str, List[str]]:
         """
 
-        def _format(self, text, bos, eos):
-            if bos:
-                text = self.tokenizer.bos_token + text
-            if eos:
-                text = text + self.tokenizer.eos_token
-            return text
-
         sentences = [text] if isinstance(text, str) else text
-        sentences = [_format(text, bos_token, eos_token) for text in sentences]
+        sentences = [
+            self._add_bos_eos(sentence, bos_token, eos_token) for sentence in sentences
+        ]
 
         return sentences
+
+    def _add_bos_eos(
+        self, text: str, bos: bool, eos: bool, chat: bool = False
+    ) -> str:
+        """
+        Adds the bos/eos token strings to the text, unless the tokenizer adds
+        them on its own (which would result in a duplicate). Chat inputs are
+        tokenized without special tokens, so those are always added here.
+        """
+        if bos and not chat and self._adds_bos:
+            warnings.warn(
+                "bos_token=True was passed, but this tokenizer already adds a "
+                "bos token on its own. Not adding a second one."
+            )
+        if eos and not chat and self._adds_eos:
+            warnings.warn(
+                "eos_token=True was passed, but this tokenizer already adds an "
+                "eos token on its own. Not adding a second one."
+            )
+        if bos and (chat or not self._adds_bos):
+            if self.tokenizer.bos_token is None:
+                raise ValueError(
+                    "bos_token=True was requested, but this tokenizer has no "
+                    "bos_token. Use bos_token=False instead."
+                )
+            text = self.tokenizer.bos_token + text
+        if eos and (chat or not self._adds_eos):
+            if self.tokenizer.eos_token is None:
+                raise ValueError(
+                    "eos_token=True was requested, but this tokenizer has no "
+                    "eos_token. Use eos_token=False instead."
+                )
+            text = text + self.tokenizer.eos_token
+        return text
 
     def encode(
         self,
@@ -1584,15 +1629,8 @@ class IncrementalLMScorer(LMScorer):
         eos_token: bool = False,
         chat: bool = False,
     ) -> BatchEncoding:
-        def _format(self, text, bos, eos):
-            if bos:
-                text = self.tokenizer.bos_token + text
-            if eos:
-                text = text + self.tokenizer.eos_token
-            return text
-
         text = [text] if isinstance(text, str) else text
-        text = [_format(self, t, bos_token, eos_token) for t in text]
+        text = [self._add_bos_eos(t, bos_token, eos_token, chat) for t in text]
         if chat == True:
             if self.tokenizer.chat_template is not None:
                 encoded = self.tokenizer(
@@ -1725,7 +1763,9 @@ class IncrementalLMScorer(LMScorer):
         for preamble_tokens in preamble_encoded:
             if bos_token:
                 restricted_id = float("inf")
-                bos_offset = 1
+                # a BOS is only added by us (rather than by the tokenizer) if
+                # the preamble's own tokenization doesn't already include it
+                bos_offset = 1 if (chat or not self._adds_bos) else 0
             else:
                 restricted_id = self.tokenizer.pad_token_id
                 bos_offset = 0
@@ -2105,7 +2145,7 @@ class IncrementalLMScorer(LMScorer):
                     ra = [0] * diff + r
                     res.append(list(zip(t, sc, ra)))
                 else:
-                    res.append(list(zip(t, sc, ra)))
+                    res.append(list(zip(t, s, r)))
             # return [list(zip(t, s, r)) for t, s, r in zip(tokens, scores, ranks)]
         else:
             for t, s in zip(tokens, scores):
@@ -2114,7 +2154,7 @@ class IncrementalLMScorer(LMScorer):
                     sc = [0.0] * diff + s
                     res.append(list(zip(t, sc)))
                 else:
-                    res.append(list(zip(t, sc)))
+                    res.append(list(zip(t, s)))
 
         return res
 
@@ -2697,7 +2737,7 @@ class Seq2SeqScorer(LMScorer):
                     ra = [0] * diff + r
                     res.append(list(zip(t, sc, ra)))
                 else:
-                    res.append(list(zip(t, sc, ra)))
+                    res.append(list(zip(t, s, r)))
             # return [list(zip(t, s, r)) for t, s, r in zip(tokens, scores, ranks)]
         else:
             for t, s in zip(tokens, scores):
@@ -2706,7 +2746,7 @@ class Seq2SeqScorer(LMScorer):
                     sc = [0.0] * diff + s
                     res.append(list(zip(t, sc)))
                 else:
-                    res.append(list(zip(t, sc)))
+                    res.append(list(zip(t, s)))
 
         return res
 
@@ -3042,7 +3082,7 @@ class Seq2SeqScorer(LMScorer):
                     ra = [0] * diff + r
                     res.append(list(zip(t, sc, ra)))
                 else:
-                    res.append(list(zip(t, sc, ra)))
+                    res.append(list(zip(t, s, r)))
             # return [list(zip(t, s, r)) for t, s, r in zip(tokens, scores, ranks)]
         else:
             for t, s in zip(tokens, scores):
@@ -3051,7 +3091,7 @@ class Seq2SeqScorer(LMScorer):
                     sc = [0.0] * diff + s
                     res.append(list(zip(t, sc)))
                 else:
-                    res.append(list(zip(t, sc)))
+                    res.append(list(zip(t, s)))
 
         return res
 
@@ -3194,7 +3234,7 @@ class MambaScorer(LMScorer):
         if self.is_bow_tokenizer:
             self.bow_subwords = defaultdict(lambda: False)
             for word, idx in self.tokenizer.get_vocab().items():
-                if word[0] == self.bow_symbol:
+                if word[:1] == self.bow_symbol:
                     self.bow_subwords[idx] = True
                 else:
                     self.bow_subwords[idx] = False
@@ -3854,7 +3894,7 @@ class MambaScorer(LMScorer):
                     ra = [0] * diff + r
                     res.append(list(zip(t, sc, ra)))
                 else:
-                    res.append(list(zip(t, sc, ra)))
+                    res.append(list(zip(t, s, r)))
             # return [list(zip(t, s, r)) for t, s, r in zip(tokens, scores, ranks)]
         else:
             for t, s in zip(tokens, scores):
@@ -3863,7 +3903,7 @@ class MambaScorer(LMScorer):
                     sc = [0.0] * diff + s
                     res.append(list(zip(t, sc)))
                 else:
-                    res.append(list(zip(t, sc)))
+                    res.append(list(zip(t, s)))
 
         return res
 
@@ -3924,7 +3964,7 @@ class VLMScorer(LMScorer):
             if self.is_bow_tokenizer:
                 self.bow_subwords = defaultdict(lambda: False)
                 for word, idx in self.tokenizer.tokenizer.get_vocab().items():
-                    if word[0] == self.bow_symbol:
+                    if word[:1] == self.bow_symbol:
                         self.bow_subwords[idx] = True
                     else:
                         self.bow_subwords[idx] = False
@@ -3958,7 +3998,7 @@ class VLMScorer(LMScorer):
             if self.is_bow_tokenizer:
                 self.bow_subwords = defaultdict(lambda: False)
                 for word, idx in self.tokenizer.get_vocab().items():
-                    if word[0] == self.bow_symbol:
+                    if word[:1] == self.bow_symbol:
                         self.bow_subwords[idx] = True
                     else:
                         self.bow_subwords[idx] = False
@@ -3993,7 +4033,7 @@ class VLMScorer(LMScorer):
         # if self.is_bow_tokenizer:
         #     self.bow_subwords = defaultdict(lambda: False)
         #     for word, idx in self.tokenizer.get_vocab().items():
-        #         if word[0] == self.bow_symbol:
+        #         if word[:1] == self.bow_symbol:
         #             self.bow_subwords[idx] = True
         #         else:
         #             self.bow_subwords[idx] = False
@@ -4440,7 +4480,7 @@ class VLMScorer(LMScorer):
                     ra = [0] * diff + r
                     res.append(list(zip(t, sc, ra)))
                 else:
-                    res.append(list(zip(t, sc, ra)))
+                    res.append(list(zip(t, s, r)))
             # return [list(zip(t, s, r)) for t, s, r in zip(tokens, scores, ranks)]
         else:
             for t, s in zip(tokens, scores):
@@ -4449,7 +4489,7 @@ class VLMScorer(LMScorer):
                     sc = [0.0] * diff + s
                     res.append(list(zip(t, sc)))
                 else:
-                    res.append(list(zip(t, sc)))
+                    res.append(list(zip(t, s)))
 
         return res
 
