@@ -24,7 +24,7 @@ copyright = '2023, Kanishka Misra'
 author = 'Kanishka Misra'
 
 # The full version, including alpha/beta/rc tags
-release = '0.3.40'
+release = '0.3.41'
 
 
 # -- General configuration ---------------------------------------------------
