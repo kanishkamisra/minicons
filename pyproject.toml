@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "minicons"
-version = "0.3.39"
+version = "0.3.40"
 description = "A package of useful functions to analyze transformer based language models."
 authors = ["Kanishka Misra <kanishka.replies@gmail.com>", "Aaron Mueller <amueller@jhu.edu>", "Carina Kauf <ckauf@mit.edu>", "Wentao Wang <wentao.wang@nyu.edu>", "Maria Ryskina <ryskina@mit.edu>"]
 license = "MIT"
@@ -13,12 +13,12 @@ keywords = ["transformers", "language models", "nlp", "interpretability"]
 minicons = 'minicons.bin.score_cli:process'
 
 [tool.poetry.dependencies]
-python = ">=3.10.0,<4"
+python = ">=3.11.5,<4"
 transformers = ">=5.5"
 accelerate= ">=0.25.0"
 torch = ">=2.5.0"
 pandas = ">=2.2.0,<3"
-pillow = ">=10.2.0"
+pillow = ">=13.0.0"
 wonderwords = ">=2.2.0"
 numpy = ">=2.0.0"
 
@@ -26,7 +26,7 @@ numpy = ">=2.0.0"
 black = ">=23.1,<27.0"
 Sphinx = ">=7.0,<9"
 furo = ">=2023.1.1"
-myst-parser = ">=2.0.0"
+myst-nb = ">=1.0.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

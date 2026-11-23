@@ -14,6 +14,8 @@ Install from Pypi using:
 
 ```pip install minicons```
 
+minicons requires Python 3.11.5 or newer (as of v0.3.40). If you are on Python 3.10, pip will keep you on v0.3.39, which no longer receives security updates. We recommend upgrading Python, or pinning `minicons<0.3.40` if you can't.
+
 ## Supported Functionality
 
 - Extract word representations from Contextualized Word Embeddings
